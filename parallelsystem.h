@@ -84,12 +84,14 @@ class LoadControl : public QObject
 	Q_OBJECT
 
 public:
-	LoadControl(int count)
+	LoadControl(int ideal_thread_count) : PerfectThreadCount(ideal_thread_count)
 	{
-		PerfectThreadCount = count;
 		reset(0);
 		IsRunning = false;
 		ThreadCount = 0;
+		UpLockTimer = new QTimer(this);
+		connect(UpLockTimer, &QTimer::timeout, this, &LoadControl::unlockUp);
+		UpLockTimer->setSingleShot(true);
 	}
 
 	void start(int count) // starts automatic managing executing threads
@@ -101,6 +103,9 @@ public:
 		{
 			TaskTimeArray[i] = QPointF(0, 0);
 		}
+		UpLock = false;
+		UpLockCount = 0;
+		SystemState = 0;
 	};
 
 	void stop() // stops automatic managing executing threads
@@ -149,6 +154,12 @@ public:
 	qreal getTimeData(int i)
 	{
 		return TaskTimeArray[i-1].x();
+	}
+
+	void lockUp(uint ms)
+	{
+		UpLock = true;
+		UpLockTimer->start(ms);
 	}
 
 public slots:
@@ -220,9 +231,17 @@ public slots:
 		{
 			if (ThreadCount < PerfectThreadCount + OVERLOAD)
 			{
-				//setXTimeData(ThreadCount, AvgTime);
-				emit addThread();
-				return true;
+				if (UpLock)
+				{
+					return false; // up-state transition is locked
+					qDebug() << "load system: unable to complete action | up-state transition is locked";
+				}
+				else
+				{
+					//setXTimeData(ThreadCount, AvgTime);
+					emit addThread();
+					return true;
+				}
 			}
 			else
 			{
@@ -246,14 +265,21 @@ public slots:
 		if (ms.y() != 0) setYTimeData(i, ms.y());
 	}
 
+	void unlockUp() { UpLock = false; }
+
 private:
 	int TaskCount = 0; // number of completed tasks in the relax state
 	int WaitCount = 0; // number of completed tasks to wait to change thread number
 	int ThreadCount = 0; // current thread number
 	qreal AvgTime = 0; // average task completion time at the same thread number
 	bool IsRunning = false; // current managing system state
-	int PerfectThreadCount; // const IdealThreadCount
+	const int PerfectThreadCount; // const IdealThreadCount
 	QPointF TaskTimeArray[DATADEPTH]; // average data for each thread number, x means the lowest and y the biggest possible time scales
+
+	bool UpLock = false; // locks the up-state transition (underload condition)
+	QTimer* UpLockTimer; // measures UpLock interval
+	quint16 SystemState = 0; // transition set bit flag (last 16)
+	uint UpLockCount = 0; // number of locks in current state
 
 signals:
 	void addThread();
@@ -364,8 +390,6 @@ public:
 		chart->setMargins(QMargins(10,0,10,10));
 
 		chart->setTheme(QChart::ChartThemeDark);
-		chart->setAnimationOptions(QChart::SeriesAnimations);
-		chart->setAnimationDuration(500);
 
 		// performance array setting
 		for (int i = 0; i < DATADEPTH; i++) { PerformanceArray[i] = 0; };
@@ -737,17 +761,17 @@ class BarChartView : public QChartView
 	Q_OBJECT
 
 public:
-	BarChartView(QWidget* parent = 0, uint precision = 2, uint depth = 10)
-		: PerformancePrecision(precision), ThreadStateDepth(depth)
+	BarChartView(QWidget* parent = 0, uint ideal_thread_count = 12, uint precision = 2, uint depth = 10)
+		: PerfectThreadCount(ideal_thread_count), PerformancePrecision(precision), ThreadStateDepth(depth)
 	{
 		//set parent widget
 		if (parent != 0) setParent(parent);
 
-		// thread base settings
+		//thread base settings
 		ThreadGlobalBase.clear();
 		ThreadLocalBase.clear();
 
-		// chart settings
+		//chart settings
 		QChart* chart = new QChart();
 		chart->setTheme(QChart::ChartThemeDark);
 
@@ -795,29 +819,30 @@ public:
 		ThreadGlobalSet->setBorderColor(ThreadGlobalSet->color());
 		ThreadLocalSet->setLabelColor(Bblue);
 		ThreadLocalSet->setBorderColor(ThreadLocalSet->color());
-	};
-	void resizeVerticalRange() // resizes vertical axis range if necessary (in order to display the whole chart area)
-	{
-		// empty
+
+		//timer update settings
+		ChartUpdateTimer = new QTimer(this);
+		connect(ChartUpdateTimer, SIGNAL(timeout()), this, SLOT(addChartPerformance()));
+		ChartUpdateTimer->start(300); // 0.3 sec - chart update period
 	};
 	inline int checkThread(ThreadState thread_state); // checks the existence of certain thread in ThreadBase, returns its thread_id or -1 if no instance is found
-	inline void addPerformance(uint thread_id); // updates data about certain thread on the chart
-	inline void clearChart(); // clears all chart and threadbase data
+	inline void clearChart(); // clears all chart data
+	inline void clearBase(); // clears all base data
 	inline void changeLabelFormat();
 
 public slots:
+	inline void addChartPerformance();
 	void addFinishedTask(const ThreadState thread_state)
 	{
 		int thread_id = checkThread(thread_state);
 		if (thread_id == -1) // not found
 		{
-			thread_id = addNewThread(thread_state);
+			addNewThread(thread_state);
 		}
 		else // found
 		{
 			addThreadState(thread_id, thread_state);
 		}
-		addPerformance(thread_id);
 	}
     void killThreadSlot()
     {
@@ -831,14 +856,21 @@ public slots:
                 thread_id = i;
             }
         }
-		if (thread_id > 0 && thread_id < ThreadBaseLength)
+		if (!ThreadGlobalBase[thread_id].isKilled())
 		{
-			ThreadLocalSet->replace(thread_id, 0.0);
-			qDebug() << "barchartview: thread" << ThreadGlobalBase[thread_id].getName() << "is killed";
+			if (thread_id >= 0 && thread_id < ThreadBaseLength)
+			{
+				ThreadGlobalBase[thread_id].kill();
+				qDebug() << "barchartview: thread" << ThreadGlobalBase[thread_id].getName() << "is killed from" << thread_id << "by kill thread slot";
+			}
+			else
+			{
+				qDebug() << "barchartview: incorrect value | thread_id is out of range :" << thread_id;
+			}
 		}
 		else
 		{
-			qDebug() << "barchartview: incorrect value | thread_id is invalid";
+			qDebug() << "barchartview: unable to complete action | threadstate is already killed";
 		}
     }
 
@@ -885,13 +917,15 @@ private:
 	QBarCategoryAxis* ThreadAxis;
 	QList<ThreadState> ThreadGlobalBase;
 	QList<ThreadState> ThreadLocalBase;
+	QTimer* ChartUpdateTimer;
 	const uint PerformancePrecision;
 	const uint ThreadStateDepth;
+	const uint PerfectThreadCount;
 	bool ThreadAxisLabelFormat = false; // false = reduced, true = full
 	inline void addThreadState(uint thread_id, ThreadState thread_state); // adds information about ended task in certain thread to ThreadBase
 	inline int addNewThread(ThreadState thread_state); // adds information about new thread to ThreadBase
 	inline void killThread(uint thread_id);
-	inline void resizeTaskAxis(uint thread_id, qreal ratio = 1.5);
+	inline void resizeTaskAxis(qreal ratio = 1.5);
 
 signals:
 
@@ -917,25 +951,38 @@ int BarChartView::checkThread(ThreadState thread_state)
 	return thread_id;
 }
 
-void BarChartView::addPerformance(uint thread_id)
+void BarChartView::addChartPerformance()
 {
-	if (ThreadGlobalBase.length() > thread_id && ThreadLocalBase.length() > thread_id 
-		&& (ThreadGlobalBase[thread_id].getName() == ThreadLocalBase[thread_id].getName()))
+	clearChart();
+	uint last = ThreadGlobalBase.length();
+	if (last > PerfectThreadCount) // number of active threads is over limit
 	{
-		if (ThreadGlobalBase[thread_id].getTasks() == 1) // newly created thread that hasn't displayed on chart
+		for (int i = 0; i < last; i++)
 		{
-			if (ThreadAxisLabelFormat) { ThreadAxis->append(ThreadGlobalBase[thread_id].getName() + " " + ThreadGlobalBase[thread_id].getPriorityString()); }
-			else { ThreadAxis->append(ThreadGlobalBase[thread_id].getName()); }
-			*ThreadGlobalSet << ThreadGlobalBase[thread_id].getPerformanceRound(PerformancePrecision);
-			*ThreadLocalSet << ThreadLocalBase[thread_id].getPerformanceRound(PerformancePrecision);
+			// polling active threads
+			if (!ThreadGlobalBase[i].isKilled() && (ThreadGlobalBase[i].getPointer()->isFinished() || !ThreadGlobalBase[i].getPointer()->isRunning()))
+			{
+				ThreadGlobalBase[i].kill();
+				qDebug() << "barchartview: thread" << ThreadGlobalBase[i].getName() << "is killed from" << i << "by polling active threads";
+			}
 		}
-		else // previously created thread instance
-		{
-			ThreadGlobalSet->replace(thread_id, ThreadGlobalBase[thread_id].getPerformanceRound(PerformancePrecision));
-			ThreadLocalSet->replace(thread_id, ThreadLocalBase[thread_id].getPerformanceRound(PerformancePrecision));
-		}
-		resizeTaskAxis(thread_id);
 	}
+
+	for (int i = 0; i < last; i++)
+	{
+		if (ThreadAxisLabelFormat) { ThreadAxis->append(ThreadGlobalBase[i].getName() + " " + ThreadGlobalBase[i].getPriorityString()); }
+		else { ThreadAxis->append(ThreadGlobalBase[i].getName()); }
+		*ThreadGlobalSet << ThreadGlobalBase[i].getPerformanceRound(PerformancePrecision);
+		if (ThreadGlobalBase[i].isKilled())
+		{
+			*ThreadLocalSet << 0.0;
+		}
+		else
+		{
+			*ThreadLocalSet << ThreadLocalBase[i].getPerformanceRound(PerformancePrecision);
+		}
+	}
+	resizeTaskAxis();
 }
 
 void BarChartView::addThreadState(uint thread_id, ThreadState thread_state)
@@ -952,30 +999,52 @@ int BarChartView::addNewThread(ThreadState thread_state)
 	if (ThreadGlobalBase.length() == ThreadLocalBase.length())
 	{
 		uint last = ThreadGlobalBase.length();
-		ThreadGlobalBase.append(thread_state);
-		ThreadLocalBase.append(thread_state);
-		ThreadLocalBase[last].setLimit(ThreadStateDepth);
-		bool done = connect(ThreadGlobalBase[last].getPointer(), &QThread::finished, this, &BarChartView::killThreadSlot);
+		uint label = last;
+		for (int i = 0; i < last; i++)
+		{
+			if (ThreadGlobalBase[i].isKilled() /*&& (ThreadGlobalBase[i].getPriority() == thread_state.getPriority())*/)
+			{
+				label = i;
+				qDebug() << "found killed thread from" << i;
+				break;
+			}
+		}
+		if (label == last)
+		{
+			ThreadGlobalBase.append(thread_state);
+			ThreadLocalBase.append(thread_state);
+		}
+		else
+		{
+			ThreadGlobalBase.replace(label, thread_state);
+			ThreadLocalBase.replace(label, thread_state);
+		}
+		ThreadLocalBase[label].setLimit(ThreadStateDepth);
+		bool done = connect(ThreadGlobalBase[label].getPointer(), &QThread::finished, this, &BarChartView::killThreadSlot);
 		if (done)
-			qDebug() << "barchartview: thread" << ThreadGlobalBase[last].getName() << "is connected";
-		return last;
+			qDebug() << "barchartview: thread" << ThreadGlobalBase[label].getName() << "is connected to" << label;
+		return label;
 	}
 	else return -1;
 }
 
 void BarChartView::clearChart()
 {
+	uint length = ThreadGlobalSet->count();
+	if (length == ThreadLocalSet->count())
+	{
+		ThreadGlobalSet->remove(0, length);
+		ThreadLocalSet->remove(0, length);
+	}
+	ThreadAxis->clear();
+}
+
+void BarChartView::clearBase()
+{
 	if (ThreadGlobalBase.count() > 0)
 	{
 		ThreadGlobalBase.clear();
 		ThreadLocalBase.clear();
-		uint length = ThreadGlobalSet->count();
-		if (length == ThreadLocalSet->count())
-		{
-			ThreadGlobalSet->remove(0, length);
-			ThreadLocalSet->remove(0, length);
-		}
-		ThreadAxis->clear();
 	}
 }
 
@@ -998,13 +1067,14 @@ void BarChartView::changeLabelFormat()
 	}
 }
 
-void BarChartView::resizeTaskAxis(uint thread_id, qreal ratio)
+void BarChartView::resizeTaskAxis(qreal ratio)
 {
-	if (ThreadGlobalBase.length() > thread_id && ThreadLocalBase.length() > thread_id)
+	uint last = ThreadGlobalBase.length();
+	for (int i = 0; i < last; i++)
 	{
-		if (TaskAxis->max() < ratio * ThreadLocalBase[thread_id].getPerformanceRound(PerformancePrecision))
+		if (TaskAxis->max() < ratio * ThreadLocalBase[i].getPerformanceRound(PerformancePrecision))
 		{
-			uint max_tasks = round(ratio * ThreadLocalBase[thread_id].getPerformance());
+			uint max_tasks = round(ratio * ThreadLocalBase[i].getPerformance());
 			TaskAxis->setMax(max_tasks);
 			while (max_tasks > 10) { max_tasks /= 2; max_tasks++; }
 			TaskAxis->setTickCount(max_tasks + 1);

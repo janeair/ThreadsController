@@ -52,11 +52,11 @@ void parallelsystem::init() // building the GUI
 	ThreadNumberBox->setAlignment(Qt::AlignCenter);
 	ThreadNumberBox->setRange(1, PerfectThreadCount + OVERLOAD);
 
-	LoadChart = new LoadChartView(PerfectThreadCount, this);
+	LoadChart = new LoadChartView(PerfectThreadCount + OVERLOAD, this);
 
-	StarScaleChart = new StarChartView(PerfectThreadCount, this);
+	StarScaleChart = new StarChartView(PerfectThreadCount + OVERLOAD, this);
 
-	BarThreadChart = new BarChartView(this);
+	BarThreadChart = new BarChartView(this, PerfectThreadCount + OVERLOAD);
 
 
 	// creating a new separate window for star scale chart
@@ -165,6 +165,7 @@ void parallelsystem::startThreads()
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
 	StarScaleChart->clearOverloadSeries();
 	BarThreadChart->clearChart();
+	BarThreadChart->clearBase();
 }
 
 
