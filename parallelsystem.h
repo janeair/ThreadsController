@@ -19,6 +19,7 @@
 #include <QToolTip>
 #include <qtextedit.h>
 #include <QtCharts>
+#include <qmenu>
 
 
 // THREAD TASK CLASS - tasks executing by every thread
@@ -121,7 +122,7 @@ public:
 
 	void setXTimeData(int i, qreal ms)
 	{
-		if ((TaskTimeArray[i - 1].x() == 0) || (TaskTimeArray[i - 1].x() > ms))
+		if ((TaskTimeArray[i - 1].x() == 0) || (TaskTimeArray[i - 1].x() > ms)) // initialization of x value or ms < current x value
 		{
 			if ((TaskTimeArray[i - 1].x() == 0) && (TaskTimeArray[i].x() != 0) && (TaskTimeArray[i].x() < ms)) // defence from time scales come till load
 			{
@@ -130,14 +131,20 @@ public:
 			else
 			{
 				TaskTimeArray[i - 1].setX(ms);
-				if (TaskTimeArray[i - 1].y() == 0) setYTimeData(i, ms * 2);
-				emit timeDataChanged(i, QPointF(ms, 0));
-				qDebug() << "set X " << ms << " for " << i;
+				if (TaskTimeArray[i - 1].y() == 0) setYTimeData(i, ms * 2); // initialization of y value 
+				emit timeDataChanged(i, QPointF(ms, 0)); // report of x value changes to star scale chart
+				qDebug() << "loadcontrol: value set | set X " << ms << " for " << i << "(min)";
 			}
 		}
-		else
+		else if (ms / TaskTimeArray[i - 1].x() - 1 > 1.0 / (WAITCOUNT * SCALE)) // ms >> current x value
 		{
-
+			qreal new_x = static_cast<qreal>((WAITCOUNT * SCALE * TaskTimeArray[i - 1].x() + ms) / (WAITCOUNT * SCALE + 1));
+			TaskTimeArray[i - 1].setX(new_x);
+			qDebug() << "loadcontrol: value set | set X " << new_x << " for " << i << "(pull up)";
+		}
+		else // ms ~ current x value
+		{
+			qDebug() << "loadcontrol: no X value correction for" << i;
 		}
 	}
 
@@ -146,8 +153,8 @@ public:
 		if (i >= 1 && ms > TaskTimeArray[i-1].x())
 		{
 			TaskTimeArray[i-1].setY(ms);
-			emit timeDataChanged(i, QPointF(0, ms));
-			qDebug() << "set Y " << ms << " for " << i;
+			emit timeDataChanged(i, QPointF(0, ms)); // report of y value changes to star scale chart
+			qDebug() << "loadcontrol: value set | set Y " << ms << " for " << i;
 		}
 	}
 
@@ -156,10 +163,33 @@ public:
 		return TaskTimeArray[i-1].x();
 	}
 
-	void lockUp(uint ms)
+	void lockUp()
 	{
 		UpLock = true;
-		UpLockTimer->start(ms);
+		if (UpLockCount < 10) UpLockCount++;
+		if (UpLockCount > 0) UpLockTimer->start(UpLockCount * 1000);
+		qDebug() << "loadcontrol: lock up for" << UpLockCount << "sec";
+	}
+
+	void updateSystemState(int transition)
+	{
+		// system state update (default: +1 - add thread; -1 - remove thread)
+		SystemState = SystemState << 1;
+		if (transition > 0) { SystemState++; }
+
+		// lock up checking (one + two transitions cycles)
+		if (SystemState % 16 == 10 || SystemState % 256 == 153 || SystemState % 256 == 204) // last 4 transitions == 1010 or last 8 transitions == 10011001 || 11001100
+		{
+			lockUp();
+		}
+		else if (SystemState % 4 == 3 || SystemState % 4 == 0) // two same transition in row (11 or 00)
+		{
+			UpLockCount = 0;
+		}
+		else
+		{
+			// do nothing
+		}
 	}
 
 public slots:
@@ -265,7 +295,11 @@ public slots:
 		if (ms.y() != 0) setYTimeData(i, ms.y());
 	}
 
-	void unlockUp() { UpLock = false; }
+	void unlockUp()
+	{ 
+		UpLock = false;
+		qDebug() << "loadcontrol: unlock up";
+	}
 
 private:
 	int TaskCount = 0; // number of completed tasks in the relax state
@@ -278,7 +312,7 @@ private:
 
 	bool UpLock = false; // locks the up-state transition (underload condition)
 	QTimer* UpLockTimer; // measures UpLock interval
-	quint16 SystemState = 0; // transition set bit flag (last 16)
+	quint16 SystemState = 0; // transition set bit flag (last 16 transitions)
 	uint UpLockCount = 0; // number of locks in current state
 
 signals:
@@ -300,13 +334,12 @@ public:
 	{ 
 		setMaxThreadNumber(1);
 		PerfectThreadCount = count;
-		TaskCount = -SEARCH_RANGE;
 	}
-	void startTasks(int ThreadNumber); // starts tasks executing by ThreadNumber similar threads
-	void addThread(); // adds one more thread to do executing tasks
-	void removeThread(); // removes one thread from running thread pool
+	inline void startThreads(int ThreadNumber); // starts tasks executing by ThreadNumber similar threads
+	inline void addThread(); // adds one more thread to do executing tasks
+	inline void removeThread(); // removes one thread from running thread pool
 	void setCurrentThreadNumber(int num) { CurrentThreadNumber = num; } // sets up the number of running threads
-	void setMaxThreadNumber(int num);
+	inline void setMaxThreadNumber(int num);
 	void stopThreads() { setMaxThreadNumber(0); MyThreadPool.clear(); } // stops all running threads and deletes all tasks
 
 public slots:
@@ -337,10 +370,10 @@ public:
 		//set parent widget
 		if (parent != 0) setParent(parent);
 
-		// set average count
+		//set average count
 		AverageCount = PerfectThreadCount;
 
-		// axis and data setting
+		//axis and data settings
 		TimeAxis = new QValueAxis;
 		TimeAxis->setRange(0.0, TimeVisibleRange);
 		TimeAxis->setTickCount(5);
@@ -368,7 +401,7 @@ public:
 		PerformanceSeries = new QLineSeries;
 		PerformanceSeries->setName("Performance");
 
-		// chart setting
+		//chart settings
 		QChart *chart = new QChart();
 
 		chart->addAxis(this->TimeAxis, Qt::AlignBottom);
@@ -391,22 +424,31 @@ public:
 
 		chart->setTheme(QChart::ChartThemeDark);
 
-		// performance array setting
+		//performance array settings
 		for (int i = 0; i < DATADEPTH; i++) { PerformanceArray[i] = 0; };
 
-		// timer setting
+		//timer setting
 		ChartUpdateTimer = new QTimer(this);
 		connect(ChartUpdateTimer, SIGNAL(timeout()), this, SLOT(updateChart()));
 		ChartUpdateTimer->start(100); // 0.1 sec - chart update period
 
 		TimeLine.start(); // so that it always contains current time for axis value
 
-		// chart widget setting
+		//chart widget settings
 		setChart(chart);
 		setRenderHint(QPainter::Antialiasing);
-		setWindowTitle("Performance Chart");
 		setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 		update();
+
+		//help menu settings
+		HelpMenu = new QMenu(this);
+		HelpMenu->addAction("Zoom In", this, &LoadChartView::zoomChartIn, Qt::Key_Up);
+		HelpMenu->addAction("Zoom Out", this, &LoadChartView::zoomChartOut, Qt::Key_Down);
+		HelpMenu->addAction("Scroll Ahead", this, &LoadChartView::scrollChartAhead, Qt::Key_Right);
+		HelpMenu->addAction("Scroll Back", this, &LoadChartView::scrollChartBack, Qt::Key_Left);
+		HelpMenu->addSeparator();
+		HelpMenu->addAction("Save Chart", this, &LoadChartView::saveChart, Qt::CTRL + Qt::Key_S);
+		setStyleSheet("QMenu::separator { height: 1px; background: rgb(100, 100, 100); margin-left: 5px; margin-right: 5px; }");
 	};
 	int getLastLoadPoint() // returns load value of last added load series point
 	{
@@ -435,38 +477,33 @@ public:
 			for (int i = 0; i < AverageCount; i++) { if (PerformanceArray[i] == 0) { PerformanceArray[i] = average; break; } }
 		}
 	}
-	void zoomChartIn(int times)
+	void zoomChartIn()
 	{
-		if (times >= 1)
-		{
-			qreal time = TimeLine.elapsed() / 1000;
-			if (time < TimeAxis->max() - TimeVisibleRange / 2) 
-			{ 
-				TimeVisibleRange /= times;
-				TimeAxis->setRange(time - TimeVisibleRange / 2, time + TimeVisibleRange / 2); 
-			}
-			else 
-			{ 
-				qreal shift = TimeVisibleRange / 2 * (times - 1) / times;
-				TimeVisibleRange /= times;
-				TimeAxis->setRange(TimeAxis->min() + shift, TimeAxis->max() - shift);
-			}
-			chart()->update();
+		qreal time = TimeLine.elapsed() / 1000;
+		if (time < TimeAxis->max() - TimeVisibleRange / 2) 
+		{ 
+			TimeVisibleRange /= 2;
+			TimeAxis->setRange(time - TimeVisibleRange / 2, time + TimeVisibleRange / 2); 
 		}
+		else 
+		{ 
+			qreal shift = TimeVisibleRange / 2 / 2;
+			TimeVisibleRange /= 2;
+			TimeAxis->setRange(TimeAxis->min() + shift, TimeAxis->max() - shift);
+		}
+		chart()->update();
 	}
-	void zoomChartOut(int times)
+	void zoomChartOut()
 	{
-		if (times >= 1)
-		{
-			qreal shift = TimeVisibleRange / 2 * times;
-			TimeVisibleRange *= times;
-			if (TimeAxis->min() < shift) { TimeAxis->setRange(0.0, TimeVisibleRange); }
-									else { TimeAxis->setRange(TimeAxis->min() - shift, TimeAxis->max() + shift); }
-			chart()->update();
-		}
+		qreal shift = TimeVisibleRange / 2 * 2;
+		TimeVisibleRange *= 2;
+		if (TimeAxis->min() < shift) { TimeAxis->setRange(0.0, TimeVisibleRange); }
+								else { TimeAxis->setRange(TimeAxis->min() - shift, TimeAxis->max() + shift); }
+		chart()->update();
 	}
 	
 private:
+	QMenu* HelpMenu;
 	QValueAxis* LoadAxis;
 	QValueAxis* TimeAxis;
 	QValueAxis* PerformanceAxis;
@@ -495,29 +532,46 @@ protected:
 	void keyPressEvent(QKeyEvent* event)
 	{
 		switch (event->key()) {
-		case Qt::Key_Plus:
-			zoomChartIn(2);
+		case Qt::Key_Up:
+			zoomChartIn();
 			break;
-		case Qt::Key_Minus:
-			zoomChartOut(2);
+		case Qt::Key_Down:
+			zoomChartOut();
+			break;
+		case Qt::Key_Right:
+			scrollChartAhead();
+			break;
+		case Qt::Key_Left:
+			scrollChartBack();
 			break;
 		case Qt::Key_S:
 		{
-			if (event->modifiers() == Qt::ControlModifier)
-			{
-				 QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
-				 QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
-				 image.save("LoadChart.png", "PNG");
-				 break;
-			}
+			if (event->modifiers() == Qt::ControlModifier) { saveChart(); }
+			break;
 		}
 		default:
 			break;
 		}
 		event->accept();
 	}
+	void mouseReleaseEvent(QMouseEvent* event)
+	{
+		if (event->button() == Qt::RightButton)
+		{
+			QPoint event_point = event->globalPos();
+			HelpMenu->popup(event_point);
+		}
+	}
 
 public slots:
+	void scrollChartAhead()
+	{
+		scrollTimeAxis(TimeVisibleRange * 2 / 25);
+	}
+	void scrollChartBack()
+	{
+		scrollTimeAxis(TimeVisibleRange * (-2) / 25);
+	}
 	void addLoadPoint(int load) // puts instantly a new load point at the end of the series (current time axis value added automatically)
 								// + time axis transformation (compression/scroll)
 	{ 
@@ -544,6 +598,13 @@ public slots:
 		this->update();
 		addLoadPoint(LastLoadPoint);
 	}
+	void saveChart()
+	{
+		QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
+		QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
+		image.save("LoadChart.png", "PNG");
+		qDebug() << "loadchartview: chart saved | LoadChart.png";
+	}
 };
 
 
@@ -554,7 +615,7 @@ class StarChartView : public QChartView
 	Q_OBJECT
 
 public:
-	StarChartView(int PerfectThreadCount, QWidget* parent = 0) : TickNumber(PerfectThreadCount + OVERLOAD)
+	StarChartView(int PerfectThreadCount, QWidget* parent = 0) : TickNumber(PerfectThreadCount)
 	{
 		//set parent widget
 		if (parent != 0) setParent(parent);
@@ -597,9 +658,9 @@ public:
 		OverloadSeries->setMarkerSize(7.5);
 
 		connect(ScaleSeries, &QAreaSeries::pressed, this, &StarChartView::pressedPoint);
-		connect(ScaleSeries, &QAreaSeries::released, this, &StarChartView::releasedPoint);
+		//connect(ScaleSeries, &QAreaSeries::released, this, &StarChartView::releasedPoint);
 		connect(OverloadSeries, &QScatterSeries::pressed, this, &StarChartView::pressedPoint);
-		connect(OverloadSeries, &QScatterSeries::released, this, &StarChartView::releasedPoint);
+		//connect(OverloadSeries, &QScatterSeries::released, this, &StarChartView::releasedPoint);
 
 		chart->addAxis(RadialAxis, QPolarChart::PolarOrientationRadial);
 		chart->addAxis(AngleAxis, QPolarChart::PolarOrientationAngular);
@@ -612,13 +673,19 @@ public:
 		OverloadSeries->attachAxis(RadialAxis);
 		OverloadSeries->attachAxis(AngleAxis);
 
-		// chart widget setting
-
+		//chart widget setting
 		setChart(chart);
 		setRenderHint(QPainter::Antialiasing);
 		update();
 
 		ScaleSeries->setBorderColor(ScaleSeries->color());
+
+		//help menu settings
+		HelpMenu = new QMenu(this);
+		HelpMenu->addAction("Clear Series", this, &StarChartView::clearOverloadSeries, Qt::CTRL + Qt::Key_X);
+		HelpMenu->addSeparator();
+		HelpMenu->addAction("Save Chart", this, &StarChartView::saveChart, Qt::CTRL + Qt::Key_S);
+		setStyleSheet("QMenu::separator { height: 1px; background: rgb(100, 100, 100); margin-left: 5px; margin-right: 5px; }");
 	};
 	void resizeRadialRange(qreal lowPoint, qreal upPoint)
 	{
@@ -635,6 +702,7 @@ public:
 	}
 
 private:
+	QMenu* HelpMenu;
 	QLineSeries* LowerScaleSeries;
 	QLineSeries* UpperScaleSeries;
 	QAreaSeries* ScaleSeries;
@@ -642,28 +710,39 @@ private:
 	QValueAxis* RadialAxis;
 	QValueAxis* AngleAxis;
 	QPoint ScreenPoint = QPoint(0,0);
+	QPointF ChartPoint = QPointF(0.0, 0.0);
 	const int TickNumber;
 
 protected:
-	void wheelEvent(QWheelEvent* event)
-	{
-		event->accept();
-	}
 	void keyPressEvent(QKeyEvent* event)
 	{
 		switch (event->key()) {
 		case Qt::Key_S:
 		{
-			if (event->modifiers() == Qt::ControlModifier)
-			{
-				QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
-				QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
-				image.save("StarScaleChart.png", "PNG");
-				break;
-			}
+			if (event->modifiers() == Qt::ControlModifier) { saveChart(); }
+			break;
+		}
+		case Qt::Key_X:
+		{
+			if (event->modifiers() == Qt::ControlModifier) { clearOverloadSeries(); }
+			break;
 		}
 		default:
 			break;
+		}
+		event->accept();
+	}
+	void mouseReleaseEvent(QMouseEvent* event)
+	{
+		if (event->button() == Qt::RightButton)
+		{
+			QPoint event_point = event->globalPos();
+			HelpMenu->popup(event_point);
+		}
+		else if (event->button() == Qt::LeftButton)
+		{
+			if (ChartPoint.x() != 0 && ChartPoint.y() != 0)
+				releasedPoint();
 		}
 		event->accept();
 	}
@@ -672,6 +751,13 @@ public slots:
 	void updateChart()
 	{
 		chart()->update();
+	}
+	void saveChart()
+	{
+		QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
+		QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
+		image.save("StarScaleChart.png", "PNG");
+		qDebug() << "starchartview: chart saved | StarScaleChart.png";
 	}
 	void addScalePoint(int tick, QPointF point)
 	{
@@ -694,9 +780,16 @@ public slots:
 	{
 		ScreenPoint.setX(QWidget::mapFromGlobal(QCursor::pos()).x());
 		ScreenPoint.setY(QWidget::mapFromGlobal(QCursor::pos()).y());
+		ChartPoint = point;
+		//qDebug() << "starscalechart: pressed point | x =" << point.x() << "y =" << point.y();
 	}
-	void releasedPoint(QPointF point)             
+	void releasedPoint()             
 	{
+		QPointF point = ChartPoint;
+		//qDebug() << "starscalechart: released point | x =" << point.x() << "y =" << point.y();
+		// clear chart point
+		ChartPoint.setX(0.0);
+		ChartPoint.setY(0.0);
 		// need to deal with non-integer angle axis coordinates (coming from line series)
 		qreal offset = point.x() - (int)point.x();
 		if (offset > 0.1 && offset < 0.9) // x-coordinate is too far from the points in series so we consider this a mistake
@@ -720,22 +813,12 @@ public slots:
 			// replace the point with the new
 			if (_point.y() > UpperScaleSeries->at((int)_point.x() - 1).y() || _point.y() < LowerScaleSeries->at((int)_point.x() - 1).y()) // the new point position is in allowed area -> replace
 			{
-				qDebug() << "allowed area" << _point.x() << _point.y();
 				OverloadSeries->replace(point, _point);
 				resizeRadialRange(_point.y(), _point.y());
 			}
-			else // --- is in restricted area -> remove (now -> do nothing << restricted memory access error)
+			else 
 			{
-				qDebug() << "restricted area" << _point.x() << _point.y(); /*
-				for (int i = 0; i < OverloadSeries->count(); i++)
-				{
-					if (point == OverloadSeries->at(i))
-					{
-						qDebug() << "trying to delete" << OverloadSeries->at(i).x() << OverloadSeries->at(i).y();
-						OverloadSeries->remove(i);
-						return;
-					}
-				}*/
+				// --- is in restricted area -> remove (now -> do nothing << restricted memory access error)
 			}
 		}
 		else // x-coordinate of the point is non-integer
@@ -824,14 +907,26 @@ public:
 		ChartUpdateTimer = new QTimer(this);
 		connect(ChartUpdateTimer, SIGNAL(timeout()), this, SLOT(addChartPerformance()));
 		ChartUpdateTimer->start(300); // 0.3 sec - chart update period
+
+		//help menu settings
+		HelpMenu = new QMenu(this);
+		HelpMenu->addAction("Label Format", this, &BarChartView::changeLabelFormat, Qt::CTRL + Qt::Key_F);
+		HelpMenu->addSeparator();
+		HelpMenu->addAction("Save Chart", this, &BarChartView::saveChart, Qt::CTRL + Qt::Key_S);
+		setStyleSheet("QMenu::separator { height: 1px; background: rgb(100, 100, 100); margin-left: 5px; margin-right: 5px; }");
 	};
 	inline int checkThread(ThreadState thread_state); // checks the existence of certain thread in ThreadBase, returns its thread_id or -1 if no instance is found
 	inline void clearChart(); // clears all chart data
 	inline void clearBase(); // clears all base data
-	inline void changeLabelFormat();
 
 public slots:
 	inline void addChartPerformance();
+	void changeLabelFormat() 
+	{ 
+		ThreadAxisLabelFormat = !ThreadAxisLabelFormat; 
+		qDebug() << "barchartview: change label format | full -" << ThreadAxisLabelFormat; 
+	}
+	inline void saveChart();
 	void addFinishedTask(const ThreadState thread_state)
 	{
 		int thread_id = checkThread(thread_state);
@@ -880,21 +975,13 @@ protected:
 		switch (event->key()) {
 		case Qt::Key_S:
 		{
-			if (event->modifiers() == Qt::ControlModifier)
-			{
-				QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
-				QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
-				image.save("BarThreadChart.png", "PNG");
-				break;
-			}
+			if (event->modifiers() == Qt::ControlModifier) { saveChart(); }
+			break;
 		}
 		case Qt::Key_F:
 		{
-			if (event->modifiers() == Qt::ControlModifier)
-			{
-				changeLabelFormat();
-				break;
-			}
+			if (event->modifiers() == Qt::ControlModifier) { changeLabelFormat(); }
+			break;
 		}
 		default:
 			break;
@@ -906,10 +993,12 @@ protected:
 		if (event->button() == Qt::RightButton)
 		{
 			QPoint event_point = event->globalPos();
+			HelpMenu->popup(event_point);
 		}
 	}
 
 private:
+	QMenu* HelpMenu;
 	QBarSet* ThreadGlobalSet;
 	QBarSeries* ThreadSeries;
 	QBarSet* ThreadLocalSet;
@@ -1048,23 +1137,12 @@ void BarChartView::clearBase()
 	}
 }
 
-void BarChartView::changeLabelFormat()
+void BarChartView::saveChart()
 {
-	ThreadAxisLabelFormat = !ThreadAxisLabelFormat;
-	uint length = ThreadGlobalBase.count();
-	if (length > 0) {
-		for (uint thread_id = 0; thread_id < length; thread_id++)
-		{
-			if (ThreadAxisLabelFormat) 
-			{ 
-				ThreadAxis->replace(ThreadGlobalBase[thread_id].getName(), ThreadGlobalBase[thread_id].getName() + " " + ThreadGlobalBase[thread_id].getPriorityString()); 
-			}
-			else 
-			{ 
-				ThreadAxis->replace(ThreadGlobalBase[thread_id].getName() + " " + ThreadGlobalBase[thread_id].getPriorityString(), ThreadGlobalBase[thread_id].getName()); 
-			}
-		}
-	}
+	QRect screen = QRect(this->mapToGlobal(QPoint(0, 0)), this->mapToGlobal(rect().bottomRight()));
+	QImage image = qApp->screens().at(0)->grabWindow(QDesktopWidget().winId(), screen.left(), screen.top(), screen.width(), screen.height()).toImage();
+	image.save("BarThreadChart.png", "PNG");
+	qDebug() << "barchartview: chart saved | BarThreadChart.png";
 }
 
 void BarChartView::resizeTaskAxis(qreal ratio)

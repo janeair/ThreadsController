@@ -64,7 +64,7 @@ void parallelsystem::init() // building the GUI
 	MinorWindow* newWindow0 = new MinorWindow(StarScaleChart, QSize(400, 400), this);
 	connect(this, SIGNAL(closed()), newWindow0, SLOT(close()));
 	
-	StarDisplayBox = new WindowControlCheckBox(newWindow0, "Load Chart");
+	StarDisplayBox = new WindowControlCheckBox(newWindow0, "Scale Chart");
 	StarDisplayBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 	StarDisplayBox->setMaximumSize(QSize(100, 60));
 
@@ -159,7 +159,7 @@ void parallelsystem::startThreads()
 	ThreadNumberBox->setEnabled(false);
 	StartButton->setText("Stop");
 	InfoEdit->append("#start " + QString::number(ThreadNumberBox->value()));
-	MyTaskManager->startTasks(ThreadNumberBox->value());
+	MyTaskManager->startThreads(ThreadNumberBox->value());
 	System->start(ThreadNumberBox->value());
 	LoadChart->addPerformancePoint(0);
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
@@ -206,6 +206,7 @@ void parallelsystem::addThread()
 		InfoEdit->append("#change " + QString::number(ThreadNumberBox->value()));
 		System->setThreadCount(ThreadNumberBox->value());
 		MyTaskManager->addThread();
+		System->updateSystemState(1);
 		LoadChart->addLoadPoint(ThreadNumberBox->value());
 	}
 }
@@ -219,6 +220,7 @@ void parallelsystem::removeThread(qreal ms = 0.0)
 		InfoEdit->append("#change " + QString::number(ThreadNumberBox->value()));
 		System->setThreadCount(ThreadNumberBox->value());
 		MyTaskManager->removeThread();
+		System->updateSystemState(-1);
 		LoadChart->addLoadPoint(ThreadNumberBox->value());
 		if (ms != 0.0) StarScaleChart->addOverloadPoint(ThreadNumberBox->value() + 1, ms);
 	}
@@ -283,6 +285,8 @@ void TaskManager::addTask()
 	{
 		ThreadTask* task = new ThreadTask(TaskCount);
 		TaskCount++;
+		if (TaskCount == SEARCH_RANGE + 1)
+			TaskCount = -SEARCH_RANGE;
 		
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(addTask()));
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(finishTask(ThreadState)));
@@ -298,16 +302,17 @@ void TaskManager::finishTask(ThreadState thread_state)
 }
 
 
-void TaskManager::startTasks(int ThreadNumber)
+void TaskManager::startThreads(int ThreadNumber)
 {
 	setMaxThreadNumber(ThreadNumber);
+	TaskCount = -SEARCH_RANGE;
 
 	for (int i = 0; i < PerfectThreadCount + OVERLOAD + 1; i++)
 	{
 		ThreadTask* task = new ThreadTask(TaskCount);
 		TaskCount++;
 		if (TaskCount == SEARCH_RANGE + 1)
-			qDebug() << "#out of range";
+			TaskCount = -SEARCH_RANGE;
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(addTask()));
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT( finishTask(ThreadState)));
 		MyThreadPool.start(task);
