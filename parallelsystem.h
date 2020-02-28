@@ -615,7 +615,7 @@ class StarChartView : public QChartView
 	Q_OBJECT
 
 public:
-	StarChartView(int PerfectThreadCount, QWidget* parent = 0) : TickNumber(PerfectThreadCount)
+	StarChartView(int PerfectThreadCount, QWidget* parent = 0) : AngleTickNumber(PerfectThreadCount)
 	{
 		//set parent widget
 		if (parent != 0) setParent(parent);
@@ -627,21 +627,21 @@ public:
 		chart->setTheme(QChart::ChartThemeDark);
 
 		RadialAxis = new QValueAxis;
-		RadialAxis->setRange(0.0, 1000.0);
+		RadialAxis->setRange(0.0, 1.0);
 		RadialAxis->setTickCount(6);
 		RadialAxis->setMinorTickCount(1);
 		RadialAxis->setLabelFormat("%i");
 		RadialAxis->setTitleText("Time, msec");
 
 		AngleAxis = new QValueAxis;
-		AngleAxis->setRange(1, TickNumber+1);
-		AngleAxis->setTickCount(TickNumber+1);
+		AngleAxis->setRange(1, AngleTickNumber + 1);
+		AngleAxis->setTickCount(AngleTickNumber + 1);
 		AngleAxis->setLabelFormat("%i");
 		AngleAxis->setTitleText("Threads");
 
 		LowerScaleSeries = new QLineSeries;
 		UpperScaleSeries = new QLineSeries;
-		for (int i = 0; i < TickNumber + 1; i++) { LowerScaleSeries->append(i + 1, 0.0); UpperScaleSeries->append(i + 1, 0.0); }
+		for (int i = 0; i < AngleTickNumber + 1; i++) { LowerScaleSeries->append(i + 1, 0.0); UpperScaleSeries->append(i + 1, 0.0); }
 
 		ScaleSeries = new QAreaSeries(UpperScaleSeries, LowerScaleSeries);
 		ScaleSeries->setPointLabelsVisible(true);
@@ -682,23 +682,75 @@ public:
 
 		//help menu settings
 		HelpMenu = new QMenu(this);
+		HelpMenu->addAction("Zoom In", this, &StarChartView::zoomChartIn, Qt::Key_Up);
+		HelpMenu->addAction("Zoom Out", this, &StarChartView::zoomChartOut, Qt::Key_Down);
 		HelpMenu->addAction("Clear Series", this, &StarChartView::clearOverloadSeries, Qt::CTRL + Qt::Key_X);
 		HelpMenu->addSeparator();
 		HelpMenu->addAction("Save Chart", this, &StarChartView::saveChart, Qt::CTRL + Qt::Key_S);
 		setStyleSheet("QMenu::separator { height: 1px; background: rgb(100, 100, 100); margin-left: 5px; margin-right: 5px; }");
 	};
-	void resizeRadialRange(qreal lowPoint, qreal upPoint)
+	bool resizeRadialRange(qreal point, qreal scale = 1.5)
 	{
-		if (lowPoint <= upPoint || upPoint == 0 || lowPoint == 0)
+		if (point * scale > RadialAxis->max()) // need to resize radial axis
 		{
-			if (upPoint != 0 && upPoint > RadialAxis->max() * 0.8) { RadialAxis->setMax(upPoint * 1.2); }
-			if (lowPoint != 0 && lowPoint < RadialAxis->min() * 1.2) { RadialAxis->setMin(lowPoint * 0.8); }
+			if (RadialScaleNumber == 0) // radial axis isn't not calibrated yet
+			{
+				calibrateRadialAxis(point);
+			}
+
+			if (RadialScaleNumber > 0) // scales > 1
+			{
+				RadialAxis->setMax(round((point * scale / pow(10, RadialScaleNumber - 1)) + 0.5) * pow(10, RadialScaleNumber - 1));
+			}
+			else if (RadialScaleNumber < 0) // scales < 1
+			{
+				RadialAxis->setMax(round((point * scale / pow(10, RadialScaleNumber)) + 0.5) * pow(10, RadialScaleNumber));
+			}
+			else 
+			{
+				qDebug() << "starchartview: unexpected value | radial axis isn't calibrated";
+			}
 			chart()->update();
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+
+	}
+	bool calibrateRadialAxis(qreal point)
+	{
+		int base = 0;
+		if (point >= 1)
+		{
+			for (base = 1; (point / pow(10, base)) >= 1; base++);
+			RadialScaleNumber = base;
+			return true;
+		}
+		else if (point >= 0)
+		{
+			for (base = -1; (point / pow(10, base)) < 1; base--);
+			RadialScaleNumber = base;
+			return true;
+		}
+		else
+		{
+			qDebug() << "starchartview: incorrect value | value is below zero";
+			return false;
 		}
 	}
 	void clearOverloadSeries()
 	{
 		OverloadSeries->clear();
+	}
+	void zoomChartIn()
+	{
+
+	}
+	void zoomChartOut()
+	{
+
 	}
 
 private:
@@ -711,12 +763,19 @@ private:
 	QValueAxis* AngleAxis;
 	QPoint ScreenPoint = QPoint(0,0);
 	QPointF ChartPoint = QPointF(0.0, 0.0);
-	const int TickNumber;
+	int RadialScaleNumber = 0;
+	const int AngleTickNumber;
 
 protected:
 	void keyPressEvent(QKeyEvent* event)
 	{
 		switch (event->key()) {
+		case Qt::Key_Up:
+			zoomChartIn();
+			break;
+		case Qt::Key_Down:
+			zoomChartOut();
+			break;
 		case Qt::Key_S:
 		{
 			if (event->modifiers() == Qt::ControlModifier) { saveChart(); }
@@ -761,19 +820,19 @@ public slots:
 	}
 	void addScalePoint(int tick, QPointF point)
 	{
-		if (tick <= TickNumber && tick >= 1) 
+		if (tick <= AngleTickNumber && tick >= 1)
 		{ 
 			if (point.x() != 0) LowerScaleSeries->replace(tick - 1, QPointF(tick, point.x())); 
 			if (point.y() != 0) UpperScaleSeries->replace(tick - 1, QPointF(tick, point.y()));
-			resizeRadialRange(point.x(), point.y());
+			resizeRadialRange(point.y());
 		}
 	}
 	void addOverloadPoint(int tick, qreal point)
 	{
-		if (tick <= TickNumber && tick >= 1)
+		if (tick <= AngleTickNumber && tick >= 1)
 		{
 			OverloadSeries->append(QPointF(tick, point));
-			resizeRadialRange(0, point);
+			resizeRadialRange(point);
 		}
 	}
 	void pressedPoint(QPointF point)
@@ -814,7 +873,7 @@ public slots:
 			if (_point.y() > UpperScaleSeries->at((int)_point.x() - 1).y() || _point.y() < LowerScaleSeries->at((int)_point.x() - 1).y()) // the new point position is in allowed area -> replace
 			{
 				OverloadSeries->replace(point, _point);
-				resizeRadialRange(_point.y(), _point.y());
+				resizeRadialRange(point.y());
 			}
 			else 
 			{
