@@ -164,8 +164,10 @@ void parallelsystem::startThreads()
 	LoadChart->addPerformancePoint(0);
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
 	StarScaleChart->clearOverloadSeries();
+	StarScaleChart->setRadialAxisCalibrated(0);
 	BarThreadChart->clearChart();
 	BarThreadChart->clearBase();
+	BarThreadChart->setTaskAxisClibrated(0);
 }
 
 

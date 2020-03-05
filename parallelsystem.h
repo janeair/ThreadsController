@@ -736,7 +736,7 @@ public:
 		}
 		else
 		{
-			qDebug() << "starchartview: incorrect value | value is below zero";
+			qDebug() << "starchartview: invalid value | value is below zero";
 			return false;
 		}
 	}
@@ -746,11 +746,22 @@ public:
 	}
 	void zoomChartIn()
 	{
-
+		qreal scale = RadialAxis->max() * 0.8;
+		calibrateRadialAxis(scale);
+		RadialAxis->setMax(scale);
+		chart()->update();
 	}
 	void zoomChartOut()
 	{
-
+		qreal scale = RadialAxis->max() * 1.25;
+		calibrateRadialAxis(scale);
+		RadialAxis->setMax(scale);
+		chart()->update();
+	}
+	void setRadialAxisCalibrated(int scale)
+	{
+		if (scale < 10 && scale > -10)
+		RadialScaleNumber = scale;
 	}
 
 private:
@@ -771,11 +782,15 @@ protected:
 	{
 		switch (event->key()) {
 		case Qt::Key_Up:
+		{
 			zoomChartIn();
 			break;
+		}
 		case Qt::Key_Down:
+		{
 			zoomChartOut();
 			break;
+		}
 		case Qt::Key_S:
 		{
 			if (event->modifiers() == Qt::ControlModifier) { saveChart(); }
@@ -919,7 +934,7 @@ public:
 
 		TaskAxis = new QValueAxis;
 		TaskAxis->setRange(0, 1);
-		TaskAxis->setTickCount(3);
+		TaskAxis->setTickCount(6);
 		TaskAxis->setMinorTickCount(1);
 		TaskAxis->setLabelFormat("%." + QString::number(PerformancePrecision-1) + "f");
 		TaskAxis->setTitleText("Performance, tasks/sec");
@@ -977,6 +992,11 @@ public:
 	inline int checkThread(ThreadState thread_state); // checks the existence of certain thread in ThreadBase, returns its thread_id or -1 if no instance is found
 	inline void clearChart(); // clears all chart data
 	inline void clearBase(); // clears all base data
+	void setTaskAxisClibrated(int scale)
+	{
+		if (scale < 10 && scale > -10)
+		TaskScaleNumber = scale;
+	}
 
 public slots:
 	inline void addChartPerformance();
@@ -1069,11 +1089,13 @@ private:
 	const uint PerformancePrecision;
 	const uint ThreadStateDepth;
 	const uint PerfectThreadCount;
+	int TaskScaleNumber = 0;
 	bool ThreadAxisLabelFormat = false; // false = reduced, true = full
 	inline void addThreadState(uint thread_id, ThreadState thread_state); // adds information about ended task in certain thread to ThreadBase
 	inline int addNewThread(ThreadState thread_state); // adds information about new thread to ThreadBase
 	inline void killThread(uint thread_id);
 	inline void resizeTaskAxis(qreal ratio = 1.5);
+	inline bool calibrateTaskAxis(qreal point);
 
 signals:
 
@@ -1204,18 +1226,55 @@ void BarChartView::saveChart()
 	qDebug() << "barchartview: chart saved | BarThreadChart.png";
 }
 
-void BarChartView::resizeTaskAxis(qreal ratio)
+void BarChartView::resizeTaskAxis(qreal scale)
 {
 	uint last = ThreadGlobalBase.length();
 	for (int i = 0; i < last; i++)
 	{
-		if (TaskAxis->max() < ratio * ThreadLocalBase[i].getPerformanceRound(PerformancePrecision))
+		if (TaskAxis->max() < scale * ThreadLocalBase[i].getPerformanceRound(PerformancePrecision))
 		{
-			uint max_tasks = round(ratio * ThreadLocalBase[i].getPerformance());
-			TaskAxis->setMax(max_tasks);
-			while (max_tasks > 10) { max_tasks /= 2; max_tasks++; }
-			TaskAxis->setTickCount(max_tasks + 1);
+			qreal point = ThreadLocalBase[i].getPerformanceRound(PerformancePrecision);
+			if (TaskScaleNumber == 0) // radial axis isn't not calibrated yet
+			{
+				calibrateTaskAxis(point);
+			}
+
+			if (TaskScaleNumber > 0) // scales > 1
+			{
+				TaskAxis->setMax(round((point * scale / pow(10, TaskScaleNumber - 1)) + 0.5) * pow(10, TaskScaleNumber - 1));
+			}
+			else if (TaskScaleNumber < 0) // scales < 1
+			{
+				TaskAxis->setMax(round((point * scale / pow(10, TaskScaleNumber)) + 0.5) * pow(10, TaskScaleNumber));
+			}
+			else
+			{
+				qDebug() << "barchartview: unexpected value | task axis isn't calibrated";
+			}
+			chart()->update();
 		}
+	}
+}
+
+bool BarChartView::calibrateTaskAxis(qreal point)
+{
+	int base = 0;
+	if (point >= 1)
+	{
+		for (base = 1; (point / pow(10, base)) >= 1; base++);
+		TaskScaleNumber = base;
+		return true;
+	}
+	else if (point >= 0)
+	{
+		for (base = -1; (point / pow(10, base)) < 1; base--);
+		TaskScaleNumber = base;
+		return true;
+	}
+	else
+	{
+		qDebug() << "barchartview: invalid value | value is below zero";
+		return false;
 	}
 }
 
