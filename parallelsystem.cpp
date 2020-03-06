@@ -18,6 +18,9 @@ parallelsystem::parallelsystem(QWidget *parent)
 	// SCALE CHART
 	connect(System, &LoadControl::timeDataChanged, StarScaleChart, &StarChartView::addScalePoint);
 	connect(StarScaleChart, &StarChartView::changedScalePoint, System, &LoadControl::setTimeData);
+	// BAR CHART + LOAD CHART
+	connect(LoadChart, &LoadChartView::updatePerformance, BarThreadChart, &BarChartView::makeOverallPerformance);
+	connect(BarThreadChart, &BarChartView::sendOverallPerformance, LoadChart, &LoadChartView::addPerformancePoint);
 }
 
 
@@ -160,14 +163,15 @@ void parallelsystem::startThreads()
 	StartButton->setText("Stop");
 	InfoEdit->append("#start " + QString::number(ThreadNumberBox->value()));
 	MyTaskManager->startThreads(ThreadNumberBox->value());
-	System->start(ThreadNumberBox->value());
-	LoadChart->addPerformancePoint(0);
+	//System->start(ThreadNumberBox->value());
+	LoadChart->addPerformancePoint(0.0);
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
+	LoadChart->setPerformanceAxisCalibrated(0);
 	StarScaleChart->clearOverloadSeries();
 	StarScaleChart->setRadialAxisCalibrated(0);
 	BarThreadChart->clearChart();
 	BarThreadChart->clearBase();
-	BarThreadChart->setTaskAxisClibrated(0);
+	BarThreadChart->setTaskAxisCalibrated(0);
 }
 
 
@@ -181,7 +185,6 @@ void parallelsystem::stopThreads()
 	MyTaskManager->stopThreads();
 	System->stop();
 	LoadChart->addLoadPoint(0);
-	LoadChart->addPerformancePoint(0);
 }
 
 
@@ -231,13 +234,6 @@ void parallelsystem::removeThread(qreal ms = 0.0)
 
 void parallelsystem::finishTask(int ms)
 {
-	//make performance series for load chart
-	qreal MinTime = System->getTimeData(ThreadNumberBox->value());
-	if ((MinTime == 0) && (ThreadNumberBox->value() > 1)) // when we have no TimeData for current state, we try to use data for previous state
-		MinTime = System->getTimeData(LoadChart->getLastLoadPoint()-1); 
-
-	LoadChart->averagePerformancePoint(MinTime/(qreal)ms*100); // exchange to percents
-
 	// inform the control system about the completion of the task
 	System->finishedTask(ms);
 }

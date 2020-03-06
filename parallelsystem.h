@@ -116,8 +116,11 @@ public:
 
 	void reset(int count)
 	{
-		AvgTime = 0;
-		TaskCount = count;
+		if (IsRunning)
+		{
+			AvgTime = 0;
+			TaskCount = count;
+		}
 	}
 
 	void setXTimeData(int i, qreal ms)
@@ -165,10 +168,17 @@ public:
 
 	void lockUp()
 	{
-		UpLock = true;
-		if (UpLockCount < 10) UpLockCount++;
-		if (UpLockCount > 0) UpLockTimer->start(UpLockCount * 1000);
-		qDebug() << "loadcontrol: lock up for" << UpLockCount << "sec";
+		if (IsRunning)
+		{
+			UpLock = true;
+			if (UpLockCount < 10) UpLockCount++;
+			if (UpLockCount > 0) UpLockTimer->start(UpLockCount * 1000);
+			qDebug() << "loadcontrol: lock up for" << UpLockCount << "sec";
+		}
+		else
+		{
+			qDebug() << "loadcontrol: automatic managing is off";
+		}
 	}
 
 	void updateSystemState(int transition)
@@ -306,7 +316,8 @@ private:
 	int WaitCount = 0; // number of completed tasks to wait to change thread number
 	int ThreadCount = 0; // current thread number
 	qreal AvgTime = 0; // average task completion time at the same thread number
-	bool IsRunning = false; // current managing system state
+	bool IsRunning = false; // 
+	bool IsStopped = false; // current managing system state
 	const int PerfectThreadCount; // const IdealThreadCount
 	QPointF TaskTimeArray[DATADEPTH]; // average data for each thread number, x means the lowest and y the biggest possible time scales
 
@@ -370,9 +381,6 @@ public:
 		//set parent widget
 		if (parent != 0) setParent(parent);
 
-		//set average count
-		AverageCount = PerfectThreadCount;
-
 		//axis and data settings
 		TimeAxis = new QValueAxis;
 		TimeAxis->setRange(0.0, TimeVisibleRange);
@@ -389,11 +397,10 @@ public:
 		LoadAxis->setTitleText("Threads, num");
 
 		PerformanceAxis = new QValueAxis;
-		PerformanceAxis->setRange(0, 100 * (PerfectThreadCount + OVERLOAD + 2) / (PerfectThreadCount + OVERLOAD) + 1);
+		PerformanceAxis->setRange(0.0, 1.0);
 		PerformanceAxis->setTickCount((PerfectThreadCount + OVERLOAD + 2) / 2 + 1);
 		PerformanceAxis->setMinorTickCount(1);
-		PerformanceAxis->setLabelFormat("%i");
-		PerformanceAxis->setTitleText("Performance, %");
+		PerformanceAxis->setTitleText("Performance, tasks/sec");
 
 		LoadSeries = new QLineSeries;
 		LoadSeries->setName("Threads");
@@ -424,13 +431,10 @@ public:
 
 		chart->setTheme(QChart::ChartThemeDark);
 
-		//performance array settings
-		for (int i = 0; i < DATADEPTH; i++) { PerformanceArray[i] = 0; };
-
 		//timer setting
 		ChartUpdateTimer = new QTimer(this);
 		connect(ChartUpdateTimer, SIGNAL(timeout()), this, SLOT(updateChart()));
-		ChartUpdateTimer->start(100); // 0.1 sec - chart update period
+		ChartUpdateTimer->start(250); // 0.25 sec - chart update period
 
 		TimeLine.start(); // so that it always contains current time for axis value
 
@@ -453,29 +457,6 @@ public:
 	int getLastLoadPoint() // returns load value of last added load series point
 	{
 		return LastLoadPoint;
-	}
-	void integerPerformancePoint(qreal performance) // puts a new load point at the end of the series integrating with last AVERAGING_DEPTH points
-	{
-		qreal average = performance;
-		for (int i = 0; i < AverageCount; i++) { average += PerformanceArray[i]; } // averaging with last AVERAGING_DEPTH points
-		average /= AverageCount + 1;
-		addPerformancePoint(average);
-		for (int i = 0; i < AverageCount - 1; i++) { PerformanceArray[i] = PerformanceArray[i + 1]; } // performance array shift
-		PerformanceArray[AverageCount - 1] = performance;
-	}
-	void averagePerformancePoint(qreal performance) // puts every AverageCount-th point at the end of the series averaging with last AverageCount points
-	{
-		qreal average = performance;
-		if (PerformanceArray[AverageCount - 1] > 0) // when the perormance array is full -> add the average into series & zeroing performance array
-		{
-			for (int i = 0; i < AverageCount; i++) { average += PerformanceArray[i]; PerformanceArray[i] = 0; }
-			average /= AverageCount + 1;
-			addPerformancePoint(average);
-		}
-		else // add to a first null element new performance value
-		{
-			for (int i = 0; i < AverageCount; i++) { if (PerformanceArray[i] == 0) { PerformanceArray[i] = average; break; } }
-		}
 	}
 	void zoomChartIn()
 	{
@@ -501,7 +482,12 @@ public:
 								else { TimeAxis->setRange(TimeAxis->min() - shift, TimeAxis->max() + shift); }
 		chart()->update();
 	}
-	
+	void setPerformanceAxisCalibrated(int scale)
+	{
+		if (scale < 10 && scale > -10)
+			PerformanceScaleNumber = scale;
+	}
+
 private:
 	QMenu* HelpMenu;
 	QValueAxis* LoadAxis;
@@ -511,11 +497,60 @@ private:
 	QLineSeries* PerformanceSeries;
 	QTimer* ChartUpdateTimer;
 	QTime TimeLine;
-	int AverageCount = 1;
-
+	int PerformanceScaleNumber = 0;
 	int LastLoadPoint = 0;
-	qreal PerformanceArray[DATADEPTH];
 	qreal TimeVisibleRange = 50.0;
+
+	bool calibratePerformanceAxis(qreal point)
+	{
+		int base = 0;
+		if (point >= 1)
+		{
+			for (base = 1; (point / pow(10, base)) >= 1; base++);
+			PerformanceScaleNumber = base;
+			return true;
+		}
+		else if (point >= 0)
+		{
+			for (base = -1; (point / pow(10, base)) < 1; base--);
+			PerformanceScaleNumber = base;
+			return true;
+		}
+		else
+		{
+			qDebug() << "loadchartview: invalid value | value is below zero";
+			return false;
+		}
+	}
+	bool resizePerformanceAxis(qreal point, qreal scale = 1.5)
+	{
+		if (point * scale > PerformanceAxis->max()) // need to resize radial axis
+		{
+			if (PerformanceScaleNumber == 0) // radial axis isn't not calibrated yet
+			{
+				calibratePerformanceAxis(point);
+			}
+
+			if (PerformanceScaleNumber > 0) // scales > 1
+			{
+				PerformanceAxis->setMax(round((point * scale / pow(10, PerformanceScaleNumber - 1)) + 0.5) * pow(10, PerformanceScaleNumber - 1));
+			}
+			else if (PerformanceScaleNumber < 0) // scales < 1
+			{
+				PerformanceAxis->setMax(round((point * scale / pow(10, PerformanceScaleNumber)) + 0.5) * pow(10, PerformanceScaleNumber));
+			}
+			else
+			{
+				qDebug() << "loadchartview: unexpected value | performance axis isn't calibrated";
+			}
+			chart()->update();
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
 
 protected:
 	void wheelEvent(QWheelEvent* event)
@@ -584,6 +619,8 @@ public slots:
 	{ 
 		qreal time = TimeLine.elapsed() / 1000;
 		PerformanceSeries->append(time, performance);
+		resizePerformanceAxis(performance);
+		//qDebug() << "loadchartview: performance point |" << performance;
 	}
 	void scrollTimeAxis(qreal dtime)
 	{
@@ -595,8 +632,9 @@ public slots:
 	}
 	void updateChart()
 	{
-		this->update();
 		addLoadPoint(LastLoadPoint);
+		chart()->update();
+		emit(updatePerformance());
 	}
 	void saveChart()
 	{
@@ -605,6 +643,9 @@ public slots:
 		image.save("LoadChart.png", "PNG");
 		qDebug() << "loadchartview: chart saved | LoadChart.png";
 	}
+
+signals:
+	void updatePerformance();
 };
 
 
@@ -717,7 +758,6 @@ public:
 		{
 			return false;
 		}
-
 	}
 	bool calibrateRadialAxis(qreal point)
 	{
@@ -992,7 +1032,7 @@ public:
 	inline int checkThread(ThreadState thread_state); // checks the existence of certain thread in ThreadBase, returns its thread_id or -1 if no instance is found
 	inline void clearChart(); // clears all chart data
 	inline void clearBase(); // clears all base data
-	void setTaskAxisClibrated(int scale)
+	void setTaskAxisCalibrated(int scale)
 	{
 		if (scale < 10 && scale > -10)
 		TaskScaleNumber = scale;
@@ -1047,6 +1087,17 @@ public slots:
 			qDebug() << "barchartview: unable to complete action | threadstate is already killed";
 		}
     }
+	void makeOverallPerformance()
+	{
+		qreal overall_performance = 0;
+		uint ThreadBaseLength = ThreadGlobalBase.length();
+		for (uint i = 0; i < ThreadBaseLength; i++)
+		{
+			if (!ThreadGlobalBase[i].isKilled())
+				overall_performance += ThreadLocalBase[i].getPerformanceRound(PerformancePrecision);
+		}
+		emit(sendOverallPerformance(overall_performance));
+	}
 
 protected:
 	void keyPressEvent(QKeyEvent* event)
@@ -1098,7 +1149,7 @@ private:
 	inline bool calibrateTaskAxis(qreal point);
 
 signals:
-
+	void sendOverallPerformance(qreal performance);
 };
 
 int BarChartView::checkThread(ThreadState thread_state)
