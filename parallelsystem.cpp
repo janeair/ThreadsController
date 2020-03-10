@@ -68,7 +68,7 @@ void parallelsystem::init() // building the GUI
 	connect(this, SIGNAL(closed()), newWindow0, SLOT(close()));
 	
 	StarDisplayBox = new WindowControlCheckBox(newWindow0, "Scale Chart");
-	StarDisplayBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	StarDisplayBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 	StarDisplayBox->setMaximumSize(QSize(100, 60));
 
 	// creating a new separate window for bar load chart
@@ -77,9 +77,16 @@ void parallelsystem::init() // building the GUI
 	connect(this, SIGNAL(closed()), newWindow1, SLOT(close()));
 
 	BarDisplayBox = new WindowControlCheckBox(newWindow1, "Bar Chart");
-	BarDisplayBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+	BarDisplayBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 	BarDisplayBox->setMaximumSize(QSize(100, 60));
 
+	// creating a system control check box
+
+	SystemControlBox = new QCheckBox("System Control", this);
+	SystemControlBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+	SystemControlBox->setMaximumSize(QSize(200, 60));
+	SystemControlBox->setStyleSheet("spacing: 10px; font: bold 8pt Tahoma;");
+	SystemControlBox->setChecked(true);
 
 	// PALETTE SETTINGS
 	
@@ -104,9 +111,22 @@ void parallelsystem::init() // building the GUI
 
 	// LAYOUTS
 
-	QVBoxLayout *checkboxlayout = new QVBoxLayout(this);
-	checkboxlayout->addWidget(StarDisplayBox);
-	checkboxlayout->addWidget(BarDisplayBox);
+	QHBoxLayout *chartboxlayout = new QHBoxLayout(this);
+	chartboxlayout->addWidget(StarDisplayBox);
+	chartboxlayout->addWidget(BarDisplayBox);
+
+	QHBoxLayout *systemboxlayout = new QHBoxLayout(this);
+	systemboxlayout->addWidget(SystemControlBox);
+
+	QGroupBox *chartgroup = new QGroupBox("Charts");
+	chartgroup->setLayout(chartboxlayout);
+	QGroupBox *systemgroup = new QGroupBox("System");
+	systemgroup->setLayout(systemboxlayout);
+
+	QVBoxLayout *checkboxgrouplayout = new QVBoxLayout(this);
+	checkboxgrouplayout->addWidget(chartgroup);
+	checkboxgrouplayout->addWidget(systemgroup);
+	checkboxgrouplayout->setAlignment(Qt::AlignRight);
 
 	QHBoxLayout *tophlayout = new QHBoxLayout(this);
 	tophlayout->addWidget(StartButton);
@@ -120,7 +140,7 @@ void parallelsystem::init() // building the GUI
 
 	QHBoxLayout *bottomhlayout = new QHBoxLayout(this);
 	bottomhlayout->addWidget(InfoEdit);
-	bottomhlayout->addLayout(checkboxlayout);
+	bottomhlayout->addLayout(checkboxgrouplayout);
 
 	QVBoxLayout *layout = new QVBoxLayout(this);
 	layout->addLayout(tophlayout);
@@ -163,7 +183,7 @@ void parallelsystem::startThreads()
 	StartButton->setText("Stop");
 	InfoEdit->append("#start " + QString::number(ThreadNumberBox->value()));
 	MyTaskManager->startThreads(ThreadNumberBox->value());
-	//System->start(ThreadNumberBox->value());
+	System->start(ThreadNumberBox->value());
 	LoadChart->addPerformancePoint(0.0);
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
 	LoadChart->setPerformanceAxisCalibrated(0);

@@ -15,6 +15,7 @@
 #include <qspinbox.h>
 #include <QHBoxlayout>
 #include <QVBoxlayout>
+#include <qgroupbox.h>
 #include <qtime>
 #include <QToolTip>
 #include <qtextedit.h>
@@ -100,9 +101,13 @@ public:
 		IsRunning = true;
 		ThreadCount = count;
 		reset(-count);
-		for (int i = 0; i < DATADEPTH; i++)
+		if (IsStopped)
 		{
-			TaskTimeArray[i] = QPointF(0, 0);
+			for (int i = 0; i < DATADEPTH; i++)
+			{
+				TaskTimeArray[i] = QPointF(0, 0);
+			}
+			IsStopped = false;
 		}
 		UpLock = false;
 		UpLockCount = 0;
@@ -112,6 +117,7 @@ public:
 	void stop() // stops automatic managing executing threads
 	{
 		IsRunning = false;
+		IsStopped = true;
 	};
 
 	void reset(int count)
@@ -1434,6 +1440,7 @@ private:
 	QSpinBox* ThreadNumberBox;
 	WindowControlCheckBox* StarDisplayBox;
 	WindowControlCheckBox* BarDisplayBox;
+	QCheckBox* SystemControlBox;
 	QTextEdit* InfoEdit;
 	LoadChartView* LoadChart;
 	StarChartView* StarScaleChart;
