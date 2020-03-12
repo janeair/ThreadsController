@@ -21,6 +21,7 @@
 #include <qtextedit.h>
 #include <QtCharts>
 #include <qmenu>
+#include <qmessagebox.h>
 
 
 // THREAD TASK CLASS - tasks executing by every thread
@@ -98,26 +99,35 @@ public:
 
 	void start(int count) // starts automatic managing executing threads
 	{
-		IsRunning = true;
-		ThreadCount = count;
-		reset(-count);
-		if (IsStopped)
+		if (count > 0)
 		{
-			for (int i = 0; i < DATADEPTH; i++)
+			IsRunning = true;
+			ThreadCount = count;
+			reset(-count);
+			if (IsStopped)
 			{
-				TaskTimeArray[i] = QPointF(0, 0);
+				for (int i = 0; i < DATADEPTH; i++)
+				{
+					TaskTimeArray[i] = QPointF(0, 0);
+				}
+				IsStopped = false;
 			}
-			IsStopped = false;
+			UpLock = false;
+			UpLockCount = 0;
+			SystemState = 0;
+			qDebug() << "loadsystem: turned on";
 		}
-		UpLock = false;
-		UpLockCount = 0;
-		SystemState = 0;
+		else
+		{
+			qDebug() << "loadsystem: couldn't perform action 'start' | argument must be above zero";
+		}
 	};
 
 	void stop() // stops automatic managing executing threads
 	{
 		IsRunning = false;
 		IsStopped = true;
+		qDebug() << "loadsystem: turned off";
 	};
 
 	void reset(int count)
@@ -206,6 +216,13 @@ public:
 		{
 			// do nothing
 		}
+	}
+
+	bool changeState(int state)
+	{
+		if (state == Qt::Checked && IsRunning == false) { start(ThreadCount); return true; }
+		else if (state == Qt::Unchecked && IsRunning == true) { stop(); return true; }
+		else { return false; }
 	}
 
 public slots:
@@ -1355,10 +1372,10 @@ public:
 	}
 
 public slots:
-	void changeState(int state = 0)
+	void changeState(int state = Qt::Unchecked)
 	{
-		if (state == 0) { hide(); }
-		else { show(); }
+		if (state == Qt::Unchecked) { hide(); }
+		else if (state == Qt::Checked) { show(); }
 	}
 
 protected:
@@ -1385,9 +1402,9 @@ public:
 		if (_window != 0)
 		{
 			window = _window;
-			setText(name + "\n Display");
+			setText(name);
 			window->setWindowTitle(name);
-			setStyleSheet("spacing: 10px; font: bold 8pt Tahoma;");
+			setStyleSheet("spacing: 8px; font: bold 7pt Tahoma;");
 			setChecked(false);
 			connect(this, SIGNAL(stateChanged(int)), window, SLOT(changeState(int)));
 			connect(window, SIGNAL(closed()), this, SLOT(windowClosed()));
@@ -1417,17 +1434,36 @@ public:
 public slots:
 	void startThreads(); // starts number of threads given by spinbox field 
 	void stopThreads(); // stops all running threads 
-	void changeState(); // changes program state to 'running' if its currently 'waiting' and back
+	void changeState(); // switches program state between 'running' and 'waiting'
 	void addThread(); // adds one new thread to current running thread pool
 	void removeThread(qreal ms); // removes one running thread from thread pool
 	void finishTask(int ms); // processing signal 'finished' emitted from task manager
 	void addThreadManual() { addThread(); }; // manual adding one thread by user
 	void removeThreadManual() { removeThread(0.0); }; // manual removing one thread by user
+	void changeSystemState(int state); // switches system state between 'running' and 'waiting'
 protected:
 	void closeEvent(QCloseEvent* event)
 	{
-		emit closed();
-		event->accept();
+		if (IsRunning)
+		{
+			int exit_return = QMessageBox::warning(this, "Load System", "Seems like system is still running\nThis may cause problems. Are you sure to quit?",
+				QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+			if (exit_return == QMessageBox::Yes)
+			{
+				emit closed();
+				stopThreads();
+				event->accept();
+			}
+			else
+			{
+				event->ignore();
+			}
+		}
+		else
+		{
+			emit closed();
+			event->accept();
+		}
 	}
 
 private:

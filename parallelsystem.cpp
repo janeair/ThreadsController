@@ -21,6 +21,8 @@ parallelsystem::parallelsystem(QWidget *parent)
 	// BAR CHART + LOAD CHART
 	connect(LoadChart, &LoadChartView::updatePerformance, BarThreadChart, &BarChartView::makeOverallPerformance);
 	connect(BarThreadChart, &BarChartView::sendOverallPerformance, LoadChart, &LoadChartView::addPerformancePoint);
+	// SYSTEM CONTROL CHECK BOX
+	connect(SystemControlBox, &QCheckBox::stateChanged, this, &parallelsystem::changeSystemState);
 }
 
 
@@ -32,8 +34,8 @@ parallelsystem::~parallelsystem()
 
 void parallelsystem::init() // building the GUI
 {
-	this->setMinimumSize(QSize(450, 450));
-	this->resize(QSize(450, 450));
+	this->setMinimumSize(QSize(500, 500));
+	this->resize(QSize(500, 500));
 	this->setWindowTitle("Load System");
 
 	PerfectThreadCount = QThread::idealThreadCount();
@@ -48,7 +50,7 @@ void parallelsystem::init() // building the GUI
 	InfoEdit = new QTextEdit();
 	InfoEdit->setStyleSheet("font: bold 8pt Tahoma;");
 	InfoEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-	InfoEdit->setMaximumHeight(60);
+	InfoEdit->setMaximumHeight(100);
 
 	ThreadNumberBox = new QSpinBox();
 	ThreadNumberBox->setStyleSheet("font: bold 8pt Tahoma;");
@@ -60,7 +62,6 @@ void parallelsystem::init() // building the GUI
 	StarScaleChart = new StarChartView(PerfectThreadCount + OVERLOAD, this);
 
 	BarThreadChart = new BarChartView(this, PerfectThreadCount + OVERLOAD);
-
 
 	// creating a new separate window for star scale chart
 
@@ -78,14 +79,14 @@ void parallelsystem::init() // building the GUI
 
 	BarDisplayBox = new WindowControlCheckBox(newWindow1, "Bar Chart");
 	BarDisplayBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-	BarDisplayBox->setMaximumSize(QSize(100, 60));
+	BarDisplayBox->setMaximumSize(QSize(100, 50));
 
 	// creating a system control check box
 
 	SystemControlBox = new QCheckBox("System Control", this);
 	SystemControlBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-	SystemControlBox->setMaximumSize(QSize(200, 60));
-	SystemControlBox->setStyleSheet("spacing: 10px; font: bold 8pt Tahoma;");
+	SystemControlBox->setMaximumSize(QSize(200, 50));
+	SystemControlBox->setStyleSheet("spacing: 8px; font: bold 7pt Tahoma;");
 	SystemControlBox->setChecked(true);
 
 	// PALETTE SETTINGS
@@ -114,20 +115,29 @@ void parallelsystem::init() // building the GUI
 	QHBoxLayout *chartboxlayout = new QHBoxLayout(this);
 	chartboxlayout->addWidget(StarDisplayBox);
 	chartboxlayout->addWidget(BarDisplayBox);
+	chartboxlayout->setMargin(0);
 
 	QHBoxLayout *systemboxlayout = new QHBoxLayout(this);
 	systemboxlayout->addWidget(SystemControlBox);
+	systemboxlayout->setMargin(0);
 
-	QGroupBox *chartgroup = new QGroupBox("Charts");
+	QGroupBox *chartgroup = new QGroupBox("Charts", this);
 	chartgroup->setLayout(chartboxlayout);
-	QGroupBox *systemgroup = new QGroupBox("System");
+	chartgroup->setCheckable(true);
+	chartgroup->setChecked(true);
+	chartgroup->setContentsMargins(10, 25, 10, 5);
+
+	QGroupBox *systemgroup = new QGroupBox("System", this);
 	systemgroup->setLayout(systemboxlayout);
+	systemgroup->setCheckable(true);
+	systemgroup->setChecked(false);
+	systemgroup->setContentsMargins(10, 25, 10, 5);
 
 	QVBoxLayout *checkboxgrouplayout = new QVBoxLayout(this);
 	checkboxgrouplayout->addWidget(chartgroup);
 	checkboxgrouplayout->addWidget(systemgroup);
-	checkboxgrouplayout->setAlignment(Qt::AlignRight);
-
+	checkboxgrouplayout->setMargin(0);
+	
 	QHBoxLayout *tophlayout = new QHBoxLayout(this);
 	tophlayout->addWidget(StartButton);
 	tophlayout->addWidget(AddButton);
@@ -182,6 +192,7 @@ void parallelsystem::startThreads()
 	ThreadNumberBox->setEnabled(false);
 	StartButton->setText("Stop");
 	InfoEdit->append("#start " + QString::number(ThreadNumberBox->value()));
+	if (SystemControlBox->isChecked()) InfoEdit->append("#system switches on");
 	MyTaskManager->startThreads(ThreadNumberBox->value());
 	System->start(ThreadNumberBox->value());
 	LoadChart->addPerformancePoint(0.0);
@@ -202,6 +213,7 @@ void parallelsystem::stopThreads()
 	ThreadNumberBox->setEnabled(true);
 	StartButton->setText("Start");
 	InfoEdit->append("#stop");
+	if (SystemControlBox->isChecked()) InfoEdit->append("#system switches off");
 	MyTaskManager->stopThreads();
 	System->stop();
 	LoadChart->addLoadPoint(0);
@@ -219,6 +231,17 @@ void parallelsystem::changeState()
 	{
 		IsRunning = true;
 		startThreads();
+	}
+}
+
+void parallelsystem::changeSystemState(int state)
+{
+	if (System->changeState(state))
+	{
+		if (state == Qt::Checked)
+			InfoEdit->append("#system switches on");
+		else if (state == Qt::Unchecked)
+			InfoEdit->append("#system switches off");
 	}
 }
 
