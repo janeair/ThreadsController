@@ -4,7 +4,7 @@
 #define OVERLOAD 0 // number of threads allowed over IdealThreadCount
 
 #define K_CONST 588 // JUST FOR FUN
-#define SEARCH_RANGE 5000 //
+#define SEARCH_RANGE 4000 //
 
 #include <QtWidgets/QMainWindow>
 #include "threadbase.h"
@@ -87,11 +87,19 @@ class LoadControl : public QObject
 	Q_OBJECT
 
 public:
-	LoadControl(int ideal_thread_count) : PerfectThreadCount(ideal_thread_count)
+	LoadControl(int ideal_thread_count) : PerfectThreadCount(ideal_thread_count), WaitFactor(0.5)
 	{
 		reset(0);
+		for (int i = 0; i < DATADEPTH; i++)
+		{
+			TaskTimeArray[i] = QPointF(0.0, 0.0);
+		}
 		IsRunning = false;
+		IsStopped = false;
 		ThreadCount = 0;
+		SystemState = 0;
+		UpLock = false;
+		UpLockCount = 0;
 		UpLockTimer = new QTimer(this);
 		connect(UpLockTimer, &QTimer::timeout, this, &LoadControl::unlockUp);
 		UpLockTimer->setSingleShot(true);
@@ -104,18 +112,7 @@ public:
 			IsRunning = true;
 			ThreadCount = count;
 			reset(-count);
-			if (IsStopped)
-			{
-				for (int i = 0; i < DATADEPTH; i++)
-				{
-					TaskTimeArray[i] = QPointF(0, 0);
-				}
-				IsStopped = false;
-			}
-			UpLock = false;
-			UpLockCount = 0;
-			SystemState = 0;
-			qDebug() << "loadsystem: turned on";
+			qDebug() << "loadsystem: turned on |" << count << "threads";
 		}
 		else
 		{
@@ -127,8 +124,23 @@ public:
 	{
 		IsRunning = false;
 		IsStopped = true;
-		qDebug() << "loadsystem: turned off";
+		UpLockCount = 0;
+		qDebug() << "loadsystem: stop";
 	};
+
+	void finish() // finish work
+	{
+		IsRunning = false;
+		IsStopped = false;
+		SystemState = 0;
+		UpLock = false;
+		UpLockCount = 0;
+		for (int i = 0; i < DATADEPTH; i++)
+		{
+			TaskTimeArray[i] = QPointF(0.0, 0.0);
+		}
+		qDebug() << "loadsystem: turned off";
+	}
 
 	void reset(int count)
 	{
@@ -150,20 +162,20 @@ public:
 			else
 			{
 				TaskTimeArray[i - 1].setX(ms);
-				if (TaskTimeArray[i - 1].y() == 0) setYTimeData(i, ms * 2); // initialization of y value 
+				if (TaskTimeArray[i - 1].y() == 0) setYTimeData(i, ms * 1.7); // initialization of y value
 				emit timeDataChanged(i, QPointF(ms, 0)); // report of x value changes to star scale chart
-				qDebug() << "loadcontrol: value set | set X " << ms << " for " << i << "(min)";
+				//qDebug() << "loadcontrol: value set | set X " << ms << " for " << i << "(min)";
 			}
 		}
 		else if (ms / TaskTimeArray[i - 1].x() - 1 > 1.0 / (WAITCOUNT * SCALE)) // ms >> current x value
 		{
 			qreal new_x = static_cast<qreal>((WAITCOUNT * SCALE * TaskTimeArray[i - 1].x() + ms) / (WAITCOUNT * SCALE + 1));
 			TaskTimeArray[i - 1].setX(new_x);
-			qDebug() << "loadcontrol: value set | set X " << new_x << " for " << i << "(pull up)";
+			//qDebug() << "loadcontrol: value set | set X " << new_x << " for " << i << "(pull up)";
 		}
 		else // ms ~ current x value
 		{
-			qDebug() << "loadcontrol: no X value correction for" << i;
+			//qDebug() << "loadcontrol: no X value correction for" << i;
 		}
 	}
 
@@ -173,7 +185,7 @@ public:
 		{
 			TaskTimeArray[i-1].setY(ms);
 			emit timeDataChanged(i, QPointF(0, ms)); // report of y value changes to star scale chart
-			qDebug() << "loadcontrol: value set | set Y " << ms << " for " << i;
+			//qDebug() << "loadcontrol: value set | set Y " << ms << " for " << i;
 		}
 	}
 
@@ -266,8 +278,16 @@ public slots:
 
 	bool underloadThread() // returns true if underload
 	{
-		if (((TaskTimeArray[ThreadCount].x() != 0) && (TaskTimeArray[ThreadCount - 1].x() != 0)) || (TaskCount >= WAITCOUNT))
-			return true;
+		if (((TaskTimeArray[ThreadCount].x() != 0) && (TaskTimeArray[ThreadCount - 1].x() != 0)) || (TaskCount >= WAITCOUNT) && (ThreadCount < PerfectThreadCount + OVERLOAD))
+		{
+			if (AvgTime > 0 && AvgTime < TaskTimeArray[ThreadCount - 1].x() + WaitFactor * (TaskTimeArray[ThreadCount - 1].y() - TaskTimeArray[ThreadCount - 1].x()))
+				return true;
+			else
+			{
+				qDebug() << "loadsystem: wait condition";
+				return false;
+			}
+		}
 		else return false;
 	}
 
@@ -292,23 +312,16 @@ public slots:
 		}
 		else if (underloadThread())
 		{
-			if (ThreadCount < PerfectThreadCount + OVERLOAD)
+			if (UpLock)
 			{
-				if (UpLock)
-				{
-					return false; // up-state transition is locked
-					qDebug() << "load system: unable to complete action | up-state transition is locked";
-				}
-				else
-				{
-					//setXTimeData(ThreadCount, AvgTime);
-					emit addThread();
-					return true;
-				}
+				//qDebug() << "load system: unable to complete action | up-state transition is locked";
+				return false; // up-state transition is locked
 			}
-			else
+				else
 			{
-				return false; // wait condition (highest thread number)
+				//setXTimeData(ThreadCount, AvgTime);
+				emit addThread();
+				return true;
 			}
 		}
 		else
@@ -342,6 +355,7 @@ private:
 	bool IsRunning = false; // 
 	bool IsStopped = false; // current managing system state
 	const int PerfectThreadCount; // const IdealThreadCount
+	const qreal WaitFactor;
 	QPointF TaskTimeArray[DATADEPTH]; // average data for each thread number, x means the lowest and y the biggest possible time scales
 
 	bool UpLock = false; // locks the up-state transition (underload condition)
@@ -1107,7 +1121,7 @@ public slots:
 		}
 		else
 		{
-			qDebug() << "barchartview: unable to complete action | threadstate is already killed";
+			//qDebug() << "barchartview: unable to complete action | threadstate is already killed";
 		}
     }
 	void makeOverallPerformance()
@@ -1249,7 +1263,7 @@ int BarChartView::addNewThread(ThreadState thread_state)
 			if (ThreadGlobalBase[i].isKilled() /*&& (ThreadGlobalBase[i].getPriority() == thread_state.getPriority())*/)
 			{
 				label = i;
-				qDebug() << "found killed thread from" << i;
+				//qDebug() << "found killed thread from" << i;
 				break;
 			}
 		}

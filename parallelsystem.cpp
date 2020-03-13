@@ -192,9 +192,12 @@ void parallelsystem::startThreads()
 	ThreadNumberBox->setEnabled(false);
 	StartButton->setText("Stop");
 	InfoEdit->append("#start " + QString::number(ThreadNumberBox->value()));
-	if (SystemControlBox->isChecked()) InfoEdit->append("#system switches on");
+	if (SystemControlBox->isChecked())
+	{
+		InfoEdit->append("#system switches on");
+		System->start(ThreadNumberBox->value());
+	}
 	MyTaskManager->startThreads(ThreadNumberBox->value());
-	System->start(ThreadNumberBox->value());
 	LoadChart->addPerformancePoint(0.0);
 	LoadChart->addLoadPoint(ThreadNumberBox->value());
 	LoadChart->setPerformanceAxisCalibrated(0);
@@ -215,7 +218,7 @@ void parallelsystem::stopThreads()
 	InfoEdit->append("#stop");
 	if (SystemControlBox->isChecked()) InfoEdit->append("#system switches off");
 	MyTaskManager->stopThreads();
-	System->stop();
+	System->finish();
 	LoadChart->addLoadPoint(0);
 }
 
