@@ -89,6 +89,13 @@ void parallelsystem::init() // building the GUI
 	SystemControlBox->setStyleSheet("spacing: 8px; font: bold 7pt Tahoma;");
 	SystemControlBox->setChecked(true);
 
+	// creating system help menu
+
+	SystemHelpMenu = new QMenu(this);
+	SystemHelpMenu->addAction("Light Mode", this, &parallelsystem::setSystemLightMode);
+	SystemHelpMenu->addAction("Hard Mode", this, &parallelsystem::setSystemHardMode);
+	SystemHelpMenu->addAction("Critical Mode", this, &parallelsystem::setSystemCriticalMode);
+
 	// PALETTE SETTINGS
 	
 	QPalette darkPalette;
@@ -239,6 +246,12 @@ void parallelsystem::changeState()
 
 void parallelsystem::changeSystemState(int state)
 {
+	if (state == Qt::Checked)
+	{
+		QPoint event_point = cursor().pos();
+		SystemHelpMenu->popup(event_point);
+	}
+
 	if (System->changeState(state))
 	{
 		if (state == Qt::Checked)

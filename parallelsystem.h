@@ -87,9 +87,10 @@ class LoadControl : public QObject
 	Q_OBJECT
 
 public:
-	LoadControl(int ideal_thread_count) : PerfectThreadCount(ideal_thread_count), WaitFactor(0.5)
+	LoadControl(int ideal_thread_count) : PerfectThreadCount(ideal_thread_count)
 	{
 		reset(0);
+		setSystemMode(SystemLightMode);
 		for (int i = 0; i < DATADEPTH; i++)
 		{
 			TaskTimeArray[i] = QPointF(0.0, 0.0);
@@ -105,6 +106,8 @@ public:
 		UpLockTimer->setSingleShot(true);
 	}
 
+	enum SystemMode { SystemLightMode, SystemHardMode, SystemCriticalMode };
+
 	void start(int count) // starts automatic managing executing threads
 	{
 		if (count > 0)
@@ -112,11 +115,11 @@ public:
 			IsRunning = true;
 			ThreadCount = count;
 			reset(-count);
-			qDebug() << "loadsystem: turned on |" << count << "threads";
+			qDebug() << "loadcontrol: turned on |" << count << "threads";
 		}
 		else
 		{
-			qDebug() << "loadsystem: couldn't perform action 'start' | argument must be above zero";
+			qDebug() << "loadcontrol: couldn't perform action 'start' | argument must be above zero";
 		}
 	};
 
@@ -125,7 +128,7 @@ public:
 		IsRunning = false;
 		IsStopped = true;
 		UpLockCount = 0;
-		qDebug() << "loadsystem: stop";
+		qDebug() << "loadcontrol: stop";
 	};
 
 	void finish() // finish work
@@ -139,7 +142,7 @@ public:
 		{
 			TaskTimeArray[i] = QPointF(0.0, 0.0);
 		}
-		qDebug() << "loadsystem: turned off";
+		qDebug() << "loadcontrol: turned off";
 	}
 
 	void reset(int count)
@@ -162,8 +165,8 @@ public:
 			else
 			{
 				TaskTimeArray[i - 1].setX(ms);
-				if (TaskTimeArray[i - 1].y() == 0) setYTimeData(i, ms * 1.7); // initialization of y value
-				emit timeDataChanged(i, QPointF(ms, 0)); // report of x value changes to star scale chart
+				setYTimeData(i, ms * AllowedZoneFactor); // setting y value
+				emit timeDataChanged(i, QPointF(ms, ms * AllowedZoneFactor)); // report of x value changes to star scale chart
 				//qDebug() << "loadcontrol: value set | set X " << ms << " for " << i << "(min)";
 			}
 		}
@@ -232,9 +235,42 @@ public:
 
 	bool changeState(int state)
 	{
-		if (state == Qt::Checked && IsRunning == false) { start(ThreadCount); return true; }
+		if (state == Qt::Checked && IsRunning == false && IsStopped == true) { start(ThreadCount); return true; }
 		else if (state == Qt::Unchecked && IsRunning == true) { stop(); return true; }
 		else { return false; }
+	}
+
+	bool setSystemMode(SystemMode mode)
+	{
+		switch (mode) {
+		case SystemLightMode:
+		{
+			WaitFactor = 0.25;
+			AllowedZoneFactor = 2.0;
+			qDebug() << "loadcontrol: set system mode | light";
+			break;
+		}
+		case SystemHardMode:
+		{
+			WaitFactor = 0.5;
+			AllowedZoneFactor = 1.75;
+			qDebug() << "loadcontrol: set system mode | hard";
+			break;
+		}
+		case SystemCriticalMode:
+		{
+			WaitFactor = 1.0;
+			AllowedZoneFactor = 1.5;
+			qDebug() << "loadcontrol: set system mode | critical";
+			break;
+		}
+		default:
+		{
+			qDebug() << "loadcontrol: invalid value | unknown system mode";
+			return false;
+		}
+		};
+		return true;
 	}
 
 public slots:
@@ -284,7 +320,7 @@ public slots:
 				return true;
 			else
 			{
-				qDebug() << "loadsystem: wait condition";
+				qDebug() << "loadcontrol: wait condition";
 				return false;
 			}
 		}
@@ -355,7 +391,8 @@ private:
 	bool IsRunning = false; // 
 	bool IsStopped = false; // current managing system state
 	const int PerfectThreadCount; // const IdealThreadCount
-	const qreal WaitFactor;
+	qreal WaitFactor; // underload to stand by ratio
+	qreal AllowedZoneFactor; // upper to lower allowed zone ratio
 	QPointF TaskTimeArray[DATADEPTH]; // average data for each thread number, x means the lowest and y the biggest possible time scales
 
 	bool UpLock = false; // locks the up-state transition (underload condition)
@@ -769,6 +806,7 @@ public:
 	};
 	bool resizeRadialRange(qreal point, qreal scale = 1.5)
 	{
+		chart()->update();
 		if (point * scale > RadialAxis->max()) // need to resize radial axis
 		{
 			if (RadialScaleNumber == 0) // radial axis isn't not calibrated yet
@@ -788,7 +826,6 @@ public:
 			{
 				qDebug() << "starchartview: unexpected value | radial axis isn't calibrated";
 			}
-			chart()->update();
 			return true;
 		}
 		else
@@ -890,11 +927,11 @@ protected:
 			QPoint event_point = event->globalPos();
 			HelpMenu->popup(event_point);
 		}
-		else if (event->button() == Qt::LeftButton)
+		/*else if (event->button() == Qt::LeftButton)
 		{
 			if (ChartPoint.x() != 0 && ChartPoint.y() != 0)
 				releasedPoint();
-		}
+		}*/
 		event->accept();
 	}
 
@@ -914,8 +951,8 @@ public slots:
 	{
 		if (tick <= AngleTickNumber && tick >= 1)
 		{ 
-			if (point.x() != 0) LowerScaleSeries->replace(tick - 1, QPointF(tick, point.x())); 
-			if (point.y() != 0) UpperScaleSeries->replace(tick - 1, QPointF(tick, point.y()));
+			if (point.x() != 0) LowerScaleSeries->replace(tick - 1, QPointF(tick, round(point.x()))); 
+			if (point.y() != 0) UpperScaleSeries->replace(tick - 1, QPointF(tick, round(point.y())));
 			resizeRadialRange(point.y());
 		}
 	}
@@ -1442,6 +1479,9 @@ class parallelsystem : public QMainWindow
 public:
 	parallelsystem(QWidget *parent = 0);
 	~parallelsystem();
+	void setSystemLightMode() { if (System->setSystemMode(LoadControl::SystemLightMode)) InfoEdit->append("#change mode - light"); }
+	void setSystemHardMode() { if (System->setSystemMode(LoadControl::SystemHardMode)) InfoEdit->append("#change mode - hard"); }
+	void setSystemCriticalMode() { if (System->setSystemMode(LoadControl::SystemCriticalMode)) InfoEdit->append("#change mode - critical"); }
 
 	void init(); // setup GUI settings
 
@@ -1483,7 +1523,7 @@ protected:
 private:
 	TaskManager* MyTaskManager;
 	LoadControl* System;
-
+	QMenu* SystemHelpMenu;
 	QPushButton* StartButton;
 	QPushButton* AddButton;
 	QPushButton* RemoveButton;
