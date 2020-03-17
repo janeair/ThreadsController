@@ -3,7 +3,6 @@
 
 #define OVERLOAD 0 // number of threads allowed over IdealThreadCount
 
-#define K_CONST 588 // JUST FOR FUN
 #define SEARCH_RANGE 4000 //
 
 #include <QtWidgets/QMainWindow>
@@ -31,17 +30,39 @@ class ThreadTask : public QObject, public QRunnable
 	Q_OBJECT
 
 public:
-	ThreadTask(qint64 num)
+	enum WorkType { CycleWork, TestWork };
+	ThreadTask(quint64 num) : id(num), work_type(CycleWork) {}
+	void do_work()
 	{
-		id = num;
+		switch (work_type) {
+		case CycleWork:
+		{
+			for (qint64 j = -SEARCH_RANGE; j <= SEARCH_RANGE; j++) {
+			for (qint64 k = -SEARCH_RANGE; k <= SEARCH_RANGE; k++)
+			{
+				if (id*id*id + j*j*j + k*k*k == 588)
+					qDebug() << "found" << id << j << k;
+			}
+			}
+			break;
+		}
+		case TestWork:
+		{
+			break;
+		}
+		default:
+		{
+			qDebug() << "threadtask: invalid value | unknown type of work";
+			break;
+		}
+		}
 	}
 
 public slots:
-
 	void run() // task to load only CPU
 	{
 		// setting priority options
-		if (id == -SEARCH_RANGE) // the very first task
+		if (id == 0) // the very first task
 		{
 			QThread::currentThread()->setPriority(QThread::LowestPriority); // set the thread's taken first task priority to lowest (only this one)
 		}
@@ -52,17 +73,10 @@ public slots:
 				QThread::currentThread()->setPriority(QThread::NormalPriority);
 			}
 		}
-
 		QTime timer;
 		timer.start();
-		for (qint64 j = -SEARCH_RANGE; j <= SEARCH_RANGE; j++)
-		for (qint64 k = -SEARCH_RANGE; k <= SEARCH_RANGE; k++)
-		{
-			if (id*id*id + j*j*j + k*k*k == K_CONST)
-				qDebug() << "found" << id << j << k
-			;
-		}
-
+		// doing work
+		do_work();
 		// gathering information about thread state
 		ThreadState thread_state = ThreadState(QString("0x%1").arg((uint)QThread::currentThreadId(), 4, 16, QLatin1Char('0')), QThread::currentThread(), timer.elapsed(), QThread::currentThread()->priority());
 		emit finish(thread_state);
@@ -72,7 +86,9 @@ signals:
 	void finish(ThreadState thread_state);
 
 private:
-	qint64 id = 0; // task id
+	const quint64 id = 0; // task id
+	const WorkType work_type; // type of work to do
+
 };
 
 
@@ -415,10 +431,9 @@ class TaskManager : public QObject
 	Q_OBJECT
 
 public:
-	TaskManager(int count) 
+	TaskManager(int count) : PerfectThreadCount(count)
 	{ 
 		setMaxThreadNumber(1);
-		PerfectThreadCount = count;
 	}
 	inline void startThreads(int ThreadNumber); // starts tasks executing by ThreadNumber similar threads
 	inline void addThread(); // adds one more thread to do executing tasks
@@ -433,8 +448,8 @@ public slots:
 
 private:
 	int CurrentThreadNumber = 1;
-	int PerfectThreadCount; // const IdealThreadCount
-	qint64 TaskCount = 0;
+	const int PerfectThreadCount; // const IdealThreadCount
+	quint64 TaskCount = 0;
 	QThreadPool MyThreadPool;
 
 signals:

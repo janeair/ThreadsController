@@ -342,9 +342,8 @@ void TaskManager::addTask()
 	{
 		ThreadTask* task = new ThreadTask(TaskCount);
 		TaskCount++;
-		if (TaskCount == SEARCH_RANGE + 1)
-			TaskCount = -SEARCH_RANGE;
-		
+		if (TaskCount == pow(2,64) - 1)
+			TaskCount = 0;
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(addTask()));
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(finishTask(ThreadState)));
 		MyThreadPool.start(task);
@@ -362,14 +361,13 @@ void TaskManager::finishTask(ThreadState thread_state)
 void TaskManager::startThreads(int ThreadNumber)
 {
 	setMaxThreadNumber(ThreadNumber);
-	TaskCount = -SEARCH_RANGE;
-
+	TaskCount = 0;
 	for (int i = 0; i < PerfectThreadCount + OVERLOAD + 1; i++)
 	{
 		ThreadTask* task = new ThreadTask(TaskCount);
 		TaskCount++;
-		if (TaskCount == SEARCH_RANGE + 1)
-			TaskCount = -SEARCH_RANGE;
+		if (TaskCount == pow(2, 64) - 1)
+			TaskCount = 0;
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT(addTask()));
 		connect(task, SIGNAL(finish(ThreadState)), this, SLOT( finishTask(ThreadState)));
 		MyThreadPool.start(task);
