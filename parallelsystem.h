@@ -3,7 +3,7 @@
 
 #define OVERLOAD 0 // number of threads allowed over IdealThreadCount
 
-#define SEARCH_RANGE 4000 //
+#define SEARCH_RANGE 1000 //
 
 #include <QtWidgets/QMainWindow>
 #include "threadbase.h"
@@ -31,28 +31,31 @@ class ThreadTask : public QObject, public QRunnable
 
 public:
 	enum WorkType { CycleWork, TestWork };
-	ThreadTask(quint64 num) : id(num), work_type(CycleWork) {}
-	void do_work()
+	ThreadTask(quint64 num) : id(num), work_type(CycleWork) { result = 0; }
+	qint64 do_work()
 	{
 		switch (work_type) {
 		case CycleWork:
 		{
+			qint64 _result = 0;
 			for (qint64 j = -SEARCH_RANGE; j <= SEARCH_RANGE; j++) {
-			for (qint64 k = -SEARCH_RANGE; k <= SEARCH_RANGE; k++)
-			{
-				if (id*id*id + j*j*j + k*k*k == 588)
-					qDebug() << "found" << id << j << k;
+				for (qint64 k = -SEARCH_RANGE; k <= SEARCH_RANGE; k++)
+				{
+					_result = round(sqrt(id*id + j*j + k*k) / 3);
+				}
 			}
-			}
+			return _result;
 			break;
 		}
 		case TestWork:
 		{
+			return 0;
 			break;
 		}
 		default:
 		{
 			qDebug() << "threadtask: invalid value | unknown type of work";
+			return 0;
 			break;
 		}
 		}
@@ -76,7 +79,7 @@ public slots:
 		QTime timer;
 		timer.start();
 		// doing work
-		do_work();
+		result = do_work();
 		// gathering information about thread state
 		ThreadState thread_state = ThreadState(QString("0x%1").arg((uint)QThread::currentThreadId(), 4, 16, QLatin1Char('0')), QThread::currentThread(), timer.elapsed(), QThread::currentThread()->priority());
 		emit finish(thread_state);
@@ -88,6 +91,7 @@ signals:
 private:
 	const quint64 id = 0; // task id
 	const WorkType work_type; // type of work to do
+	qint64 result;
 
 };
 
